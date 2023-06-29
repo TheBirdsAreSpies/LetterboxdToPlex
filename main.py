@@ -2,7 +2,7 @@ import autoselection
 import config
 import csv
 import datetime
-from plexapi.myplex import PlexServer, MyPlexAccount
+from plexapi.myplex import PlexServer
 from plexapi.exceptions import NotFound, BadRequest
 from ignoremovie import IgnoreMovie
 from mapping import Mapping
@@ -46,9 +46,15 @@ def sort_list_ignore_words(lst):
     lst.sort(key=lambda x: ' '.join(word for word in x[0].split() if word.lower() not in config.ignore_words))
     return lst
 
-def sort_playlist_ignore_words(lst):
-    lst.sort(key=lambda x: ' '.join(word for word in x.title.split() if word.lower() not in config.ignore_words))
-    return lst
+def sort_playlist_ignore_words(movies):
+    sorted_movies = sorted(movies, key=lambda movie: clean_title(movie.title))
+    return sorted_movies
+
+def clean_title(title):
+    words = title.strip().lower().split()
+    cleaned_words = [word for word in words if word not in config.ignore_words]
+    cleaned_title = ' '.join(cleaned_words)
+    return cleaned_title
 
 def find_movie_by_letterboxd_title(mapping, letterboxd_title):
     for obj in mapping:
