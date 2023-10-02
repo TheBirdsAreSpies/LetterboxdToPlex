@@ -56,6 +56,7 @@ def watchlist(plex, movies):
 
             mapped = __find_movie_by_letterboxd_title__(mapping, combination.name)
             if mapped:
+                if mapped.year > -1: year = mapped.year
                 combination = Movie(mapped.plex_title, year)
                 name = combination.name
 

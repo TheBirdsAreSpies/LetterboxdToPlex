@@ -4,9 +4,10 @@ import config
 
 
 class Mapping:
-    def __init__(self, letterboxd_title, plex_title):
+    def __init__(self, letterboxd_title, plex_title, year):
         self.letterboxd_title = letterboxd_title
         self.plex_title = plex_title
+        self.year = year
 
 
     @staticmethod
@@ -18,7 +19,10 @@ class Mapping:
 
                 items = []
                 for data in data_list:
-                    item = Mapping(data["letterboxd_title"], data["plex_title"])
+                    if 'year' in data:
+                        item = Mapping(data["letterboxd_title"], data["plex_title"], data["year"])
+                    else:
+                        item = Mapping(data["letterboxd_title"], data["plex_title"], -1)
                     items.append(item)
 
                 return items
