@@ -16,7 +16,7 @@ def main():
                         help='creates a csv file to import to a Letterboxd list. ' +
                         'Used to get the \'owned\' filter. If number is passed after, only that amount of recent movies ' +
                         'will get processed')
-    parser.add_argument('-w', '--watchlist',
+    parser.add_argument('-w', '--watchlist', action='store_true',
                         help='exports movies from Letterboxd watchlist to Plex')
     args = parser.parse_args()
 
@@ -25,6 +25,7 @@ def main():
     if args.owned is not None:
         owned.create_csv(movies, args.owned)
     if args.rating:
+        # todo implement
         pass
 
     print("Done")
