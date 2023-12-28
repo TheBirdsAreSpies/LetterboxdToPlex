@@ -12,6 +12,7 @@ from mapping import Mapping
 from movie import Movie
 from tqdm import tqdm
 
+
 def watchlist(plex, movies):
     current_year = datetime.datetime.now().year
     to_ignore = IgnoreMovie.load_json() or []
@@ -19,7 +20,7 @@ def watchlist(plex, movies):
     autoselector = autoselection.AutoSelection.load_json() or []
 
     tv_shows = plex.library.section('TV Shows')
-    account = plex.myPlexAccount() # only needed when using builtin watchlist
+    account = plex.myPlexAccount()  # only needed when using builtin watchlist
 
     if config.prefer_url_over_csv:
         data = __read_watchlist_url__()
@@ -33,10 +34,10 @@ def watchlist(plex, movies):
     else:
         sorted_data = data
 
-    missing = [] # maybe restore to save new missing entries at the bottom
+    missing = []  # maybe restore to save new missing entries at the bottom
     to_add = []
 
-    with tqdm(total=len(sorted_data), unit='Movies') as pbar: #ncols=100
+    with tqdm(total=len(sorted_data), unit='Movies') as pbar:  # ncols=100
         for name, year in sorted_data:
             skip = False
             combination = Movie(name, year)
@@ -44,29 +45,33 @@ def watchlist(plex, movies):
 
             if name == '' or year == '':
                 skip = True
-            elif int(year) > current_year: # skip movies that have not yet been released
+            elif int(year) > current_year:  # skip movies that yet have not been released
                 skip = True
-            elif any(combination.name == existing.name and combination.year == existing.year for existing in to_ignore): # movie is in ignore list, maybe remove due to the second check after mapping
+            elif any(combination.name == existing.name and combination.year == existing.year for existing in
+                     to_ignore):  # movie is in ignore list, maybe remove due to the second check after mapping
                 skip = True
 
             if skip:
                 pbar.update(1)
                 continue
 
-
             mapped = __find_movie_by_letterboxd_title__(mapping, combination.name)
             if mapped:
-                if mapped.year > -1: year = mapped.year
+                if mapped.year > -1:
+                    year = mapped.year
                 combination = Movie(mapped.plex_title, year)
                 name = combination.name
 
-            is_ignored = any(combination.name == existing.name and combination.year == existing.year for existing in to_ignore)
+            is_ignored = any(
+                combination.name == existing.name and combination.year == existing.year for existing in to_ignore)
             if is_ignored:
                 pbar.update(1)
                 continue
 
-            years = [year, str(int(year) - 1), str(int(year) + 1)] # include year + 1 because lb is using premiere dates instead of cinema dates
-            result = movies.search(title=name, year=years) # use decade to avoid missing movies because of one year diff
+            years = [year, str(int(year) - 1),
+                     str(int(year) + 1)]  # include year + 1 because lb is using premiere dates instead of cinema dates
+            result = movies.search(title=name,
+                                   year=years)  # use decade to avoid missing movies because of one year diff
             if len(result) == 1:
                 to_add.append(result[0])
             elif len(result) > 1:
@@ -89,15 +94,18 @@ def watchlist(plex, movies):
                         autoselection.AutoSelection.store_json(autoselector)
                         to_add.append(result[selection - 1])
 
-            else: # len(result) == 0:
-                result = tv_shows.search(title=name) # to ignore tv shows
+            else:  # len(result) == 0:
+                result = tv_shows.search(title=name)  # to ignore tv shows
 
-                if len(result) > 0: # seems like a tv show, ignore
-                    is_present = any(combination.name == existing.name and combination.year == existing.year for existing in to_ignore)
+                if len(result) > 0:  # seems like a tv show, ignore
+                    is_present = any(
+                        combination.name == existing.name and combination.year == existing.year for existing in
+                        to_ignore)
                     if not is_present:
                         to_ignore.append(combination)
                 else:
-                    is_present = any(combination.name == existing.name and combination.year == existing.year for existing in missing)
+                    is_present = any(
+                        combination.name == existing.name and combination.year == existing.year for existing in missing)
                     if not is_present:
                         missing.append(combination)
 
@@ -117,7 +125,8 @@ def watchlist(plex, movies):
 
                     to_add_cleaned = []
                     for m in to_add:
-                        is_in_playlist = any(movie.title == m.title and movie.year == m.year for movie in existing_playlist.items())
+                        is_in_playlist = any(
+                            movie.title == m.title and movie.year == m.year for movie in existing_playlist.items())
                         if not is_in_playlist:
                             to_add_cleaned.append(m)
 
@@ -137,10 +146,10 @@ def watchlist(plex, movies):
                 except BadRequest:
                     print("\nAlready on watchlist - ignore.")
 
-
         IgnoreMovie.store_json(to_ignore)
         MissingMovie.store_json(missing)
         autoselection.AutoSelection.store_json(autoselector)
+
 
 def __find_preselection__(autoselector, combination, resultset):
     key = None
@@ -155,6 +164,7 @@ def __find_preselection__(autoselector, combination, resultset):
             return movie
     return None
 
+
 def __read_watchlist_csv__(file_path):
     data = []
 
@@ -165,6 +175,7 @@ def __read_watchlist_csv__(file_path):
             date, name, year, uri = row
             data.append((name, year))
     return data
+
 
 def __read_watchlist_url__():
     data = []
@@ -184,6 +195,7 @@ def __read_watchlist_url__():
 
     return data
 
+
 def __get_watched_movies_not_rated__():
     watched_data = util.read_general_csv(config.watched_path)
     ratings_data = util.read_general_csv(config.ratings_path)
@@ -194,19 +206,23 @@ def __get_watched_movies_not_rated__():
     entries_not_in_ratings = watched_entries - ratings_entries
     return entries_not_in_ratings
 
+
 def __find_movie_by_letterboxd_title__(mapping, letterboxd_title):
     for obj in mapping:
         if obj.letterboxd_title == letterboxd_title:
             return obj
     return None
 
+
 def __sort_list_ignore_words__(lst):
     lst.sort(key=lambda x: ' '.join(word for word in x[0].split() if word.lower() not in config.ignore_words))
     return lst
 
+
 def __sort_playlist_ignore_words__(movies):
     sorted_movies = sorted(movies, key=lambda movie: __clean_title__(movie.title))
     return sorted_movies
+
 
 def __clean_title__(title):
     words = title.strip().lower().split()

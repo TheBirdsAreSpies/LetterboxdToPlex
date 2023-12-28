@@ -18,7 +18,6 @@ class AutoSelection:
             'movie_to_prefer_key': self.movie_to_prefer_key
         }
 
-
     @staticmethod
     def load_json():
         if os.path.exists(config.autoselection_path):

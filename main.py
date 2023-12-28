@@ -14,8 +14,8 @@ def main():
     parser.add_argument('-r', '--rating', action='store_true', help='exports Letterboxd ratings to Plex movies')
     parser.add_argument('-o', '--owned', type=int, nargs='?', const=-1,
                         help='creates a csv file to import to a Letterboxd list. ' +
-                        'Used to get the \'owned\' filter. If number is passed after, only that amount of recent movies ' +
-                        'will get processed')
+                             'Used to get the \'owned\' filter. If number is passed after, only that amount of recent movies ' +
+                             'will get processed')
     parser.add_argument('-w', '--watchlist', action='store_true',
                         help='exports movies from Letterboxd watchlist to Plex')
     args = parser.parse_args()
@@ -29,6 +29,7 @@ def main():
         pass
 
     print("Done")
+
 
 if __name__ == "__main__":
     main()
