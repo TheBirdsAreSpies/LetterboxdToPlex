@@ -20,7 +20,6 @@ def watchlist(plex, movies):
     autoselector = autoselection.AutoSelection.load_json() or []
 
     tv_shows = plex.library.section('TV Shows')
-    account = plex.myPlexAccount()  # only needed when using builtin watchlist
 
     if config.prefer_url_over_csv:
         data = __read_watchlist_url__()
@@ -140,6 +139,7 @@ def watchlist(plex, movies):
             plex.createPlaylist(title='Letterboxd Watchlist', items=to_add)
 
         if config.use_builtin_watchlist:
+            account = plex.myPlexAccount()
             for movie in to_add:
                 try:
                     account.addToWatchlist(movie)

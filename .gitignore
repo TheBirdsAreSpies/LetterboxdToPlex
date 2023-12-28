@@ -154,6 +154,4 @@ autoselection.json
 ignore.json
 mapping.json
 missing.json
-watched.csv
-watchlist.csv
-ratings.csv
+*.csv
