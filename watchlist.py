@@ -12,6 +12,7 @@ from mapping import Mapping
 from movie import Movie
 from tqdm import tqdm
 
+
 def watchlist(plex, movies):
     current_year = datetime.datetime.now().year
     to_ignore = IgnoreMovie.load_json() or []

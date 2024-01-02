@@ -2,7 +2,10 @@ import argparse
 import config
 import owned
 import watchlist
+import zipfile
 from plexapi.myplex import PlexServer
+from letterboxd_apy.user import User
+from letterboxd_apy.login import Login
 
 
 def main():
@@ -19,6 +22,15 @@ def main():
     parser.add_argument('-w', '--watchlist', action='store_true',
                         help='exports movies from Letterboxd watchlist to Plex')
     args = parser.parse_args()
+
+    zipfile_name = 'letterboxd_export.zip'
+    login = Login('LOGIN_USERNAME', 'LOGIN_PASSWORD')
+    login.login()
+    user = User('USERNAME')
+    user.download_export_data(zipfile_name)
+
+    with zipfile.ZipFile(zipfile_name, 'r') as zip_ref:
+        zip_ref.extractall('.')
 
     if args.watchlist or (args.owned is None and not args.rating):
         watchlist.watchlist(plex, movies)
