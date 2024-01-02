@@ -12,7 +12,6 @@ from mapping import Mapping
 from movie import Movie
 from tqdm import tqdm
 
-
 def watchlist(plex, movies):
     current_year = datetime.datetime.now().year
     to_ignore = IgnoreMovie.load_json() or []
@@ -33,14 +32,15 @@ def watchlist(plex, movies):
     else:
         sorted_data = data
 
-    missing = []  # maybe restore to save new missing entries at the bottom
+    missing = MissingMovie.load_json()
     to_add = []
 
-    with tqdm(total=len(sorted_data), unit='Movies') as pbar:  # ncols=100
+    with tqdm(total=len(sorted_data), unit='Movies') as pbar:
         for name, year in sorted_data:
             skip = False
             combination = Movie(name, year)
             pbar.set_description(f'Processing {name} ({year})'.ljust(80, ' '))
+            was_missing_names = []
 
             if name == '' or year == '':
                 skip = True
@@ -55,6 +55,7 @@ def watchlist(plex, movies):
                 continue
 
             mapped = __find_movie_by_letterboxd_title__(mapping, combination.name)
+            was_missing_names.append(combination.name)
             if mapped:
                 if mapped.year > -1:
                     year = mapped.year
@@ -67,12 +68,15 @@ def watchlist(plex, movies):
                 pbar.update(1)
                 continue
 
-            years = [year, str(int(year) - 1),
-                     str(int(year) + 1)]  # include year + 1 because lb is using premiere dates instead of cinema dates
-            result = movies.search(title=name,
-                                   year=years)  # use decade to avoid missing movies because of one year diff
+            # include year + 1 because lb is using premiere dates instead of cinema dates
+            years = [year, str(int(year) - 1), str(int(year) + 1)]
+            result = movies.search(title=name, year=years)
+            was_missing_names.append(name)
+
             if len(result) == 1:
                 to_add.append(result[0])
+                missing = _remove_from_missing_if_needed(missing, was_missing_names)
+
             elif len(result) > 1:
                 counter = 1
                 preselection = __find_preselection__(autoselector, combination, result)
@@ -81,6 +85,8 @@ def watchlist(plex, movies):
                 if preselection:
                     print(f'Auto selected {preselection.title} ({preselection.year})')
                     to_add.append(preselection)
+                    was_missing_names.append(preselection.title)
+                    missing = _remove_from_missing_if_needed(missing, was_missing_names)
                 else:
                     for movie in result:
                         print(f'{counter}: {movie.title} ({movie.year})')
@@ -88,10 +94,13 @@ def watchlist(plex, movies):
 
                     selection = int(input('Use:'))
                     if 0 < selection < len(result) + 1:
-                        selector = autoselection.AutoSelection(combination, result[selection - 1].key)
+                        res = result[selection - 1]
+                        selector = autoselection.AutoSelection(combination, res.key)
                         autoselector.append(selector)
                         autoselection.AutoSelection.store_json(autoselector)
-                        to_add.append(result[selection - 1])
+                        to_add.append(res)
+                        was_missing_names.append(res.title)
+                        missing = _remove_from_missing_if_needed(missing, was_missing_names)
 
             else:  # len(result) == 0:
                 result = tv_shows.search(title=name)  # to ignore tv shows
@@ -149,6 +158,12 @@ def watchlist(plex, movies):
         IgnoreMovie.store_json(to_ignore)
         MissingMovie.store_json(missing)
         autoselection.AutoSelection.store_json(autoselector)
+
+
+def _remove_from_missing_if_needed(missing, names):
+    names_set = set(names)
+    missing = [movie for movie in missing if movie.name not in names_set]
+    return missing
 
 
 def __find_preselection__(autoselector, combination, resultset):

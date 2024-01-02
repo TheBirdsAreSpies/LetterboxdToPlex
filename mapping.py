@@ -9,7 +9,6 @@ class Mapping:
         self.plex_title = plex_title
         self.year = year
 
-
     @staticmethod
     def load_json():
         if os.path.exists(config.mapping_path):
