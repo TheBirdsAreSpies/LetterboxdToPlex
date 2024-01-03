@@ -4,7 +4,6 @@ import owned
 import watchlist
 import zipfile
 from plexapi.myplex import PlexServer
-from letterboxd_apy.user import User
 from letterboxd_apy.login import Login
 
 
