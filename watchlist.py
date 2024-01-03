@@ -2,7 +2,6 @@ import config
 import datetime
 import autoselection
 import csv
-import requests
 import util
 
 from plexapi.exceptions import NotFound, BadRequest
@@ -21,10 +20,7 @@ def watchlist(plex, movies):
 
     tv_shows = plex.library.section('TV Shows')
 
-    if config.prefer_url_over_csv:
-        data = __read_watchlist_url__()
-    else:
-        data = __read_watchlist_csv__(config.watchlist_path)
+    data = __read_watchlist_csv__(config.watchlist_path)
     if config.include_watched_not_rated:
         data += __get_watched_movies_not_rated__()
 
@@ -33,7 +29,7 @@ def watchlist(plex, movies):
     else:
         sorted_data = data
 
-    missing = MissingMovie.load_json()
+    missing = MissingMovie.load_json() or []
     to_add = []
 
     with tqdm(total=len(sorted_data), unit='Movies') as pbar:
