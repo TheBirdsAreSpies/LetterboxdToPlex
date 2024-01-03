@@ -3,7 +3,6 @@ baseurl = 'http://127.0.0.1:32400'
 token = 'YOUR_PLEX_TOKEN'
 
 # general settings
-prefer_url_over_csv = False
 use_playlist_as_watchlist = True  # creates a playlist by the watchlist on letterboxd
 use_builtin_watchlist = False  # uses the builtin watchlist feature in plex
 sort_by_title = True  # sorts the playlist by name - for watchlist as playlist only
