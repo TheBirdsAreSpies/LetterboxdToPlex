@@ -192,25 +192,6 @@ def __read_watchlist_csv__(file_path):
     return data
 
 
-def __read_watchlist_url__():
-    data = []
-
-    response = requests.get(config.letterboxd_watchlist_url)
-
-    if response.status_code == 200:
-        json_data = response.json()
-
-        for item in json_data:
-            title = item["title"]
-            year = item["release_year"]
-            data.append((title, year))
-
-    else:
-        print("Error while reading json.")
-
-    return data
-
-
 def __get_watched_movies_not_rated__():
     watched_data = util.read_general_csv(config.watched_path)
     ratings_data = util.read_general_csv(config.ratings_path)
