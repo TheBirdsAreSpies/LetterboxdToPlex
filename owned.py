@@ -1,7 +1,6 @@
 import csv
 from tqdm import tqdm
 
-
 def create_csv(movies, max_results):
     to_export = []
 
