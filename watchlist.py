@@ -152,9 +152,9 @@ def watchlist(plex, movies):
             except BadRequest:
                 print("\nAlready on watchlist - ignore.")
 
-        IgnoreMovie.store_json(to_ignore)
-        MissingMovie.store_json(missing)
-        autoselection.AutoSelection.store_json(autoselector)
+    IgnoreMovie.store_json(to_ignore)
+    MissingMovie.store_json(missing)
+    autoselection.AutoSelection.store_json(autoselector)
 
 
 def _remove_from_missing_if_needed(missing, names):
