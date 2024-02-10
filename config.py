@@ -2,11 +2,10 @@
 baseurl = 'http://127.0.0.1:32400'
 token = 'YOUR_PLEX_TOKEN'
 
-# letterpy
+# api
 use_api = False
 api_username = 'USERNAME'
 api_password = 'PASSWORD'
-api_user = 'USERNAME'
 
 # general settings
 use_playlist_as_watchlist = True  # creates a playlist by the watchlist on letterboxd
