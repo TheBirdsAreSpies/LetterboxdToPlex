@@ -42,7 +42,7 @@ class Session:
         }
 
         auth_code = ""
-        if use_auth_code:
+        if use_2fa_code:
             auth_code = input("Enter 2FA code: ")
 
         data = {
