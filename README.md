@@ -7,6 +7,7 @@ As its name says: **Letterboxd to Plex** will import your (pre exported) Letterb
 This script will also support the default watchlist. Read `Other features` and `Configuration` for further information.
 
 Somewhat similar to [PlexImportWatchlist](https://github.com/techkek/PlexImportWatchlist).
+
 ## How to use
 
 1. Install needed third party libraries
@@ -27,13 +28,19 @@ Or else you can also:
 3.1 Update `config.py` and set the field `use_api` to `True`. Also update fields `api_username` and `api_password` to download the zip file automatically.
 
 5. Run `python main.py`
-## Other features
+
+## Other information
 
 - You decide whether this script will use the default watchlist or create a brand-new playlist. If there is another playlist that you have created previously, you can also skip the movies that were already added to that existing list.
 - Letterboxd lists some TV shows also. Since this script only supports movies, it will exclude those shows and saves them in a file called `ignore.json`. This will skip those shows and prevents unnecessary API calls in the future.
 - You will add movies to your watchlist that are not on your Plex server yet. This script will add all missing movies to a file called `missing.json`.
 - Unfortunately Plex' search feature is not perfect. Sometimes a search query will find more than one movie in your collection. This script will ask you which of your movies is the correct one. Afterwards it will memorize your decision and stops to ask when running the script again. This information is stored in a file called `autoselection.json`. You can also enter "0" when it asks for the mapping to skip the procedure (e.g. movie is not present but search still finds movies).
 - Since Letterboxd stores all of its information in English, this script may encounter difficulties in finding foreign language movies. You can map those movies yourself and this script will find them in the next run. The most easy way is to cut the entry from `missing.json` and copy it to `mapping.json`. Afterwards you have to enter the correct titles. Take a look to `Examples`.
+
+## Script parameters
+- **`-w / --watchlist`** - Creates a watchlist on Plex, based on your Letterboxd watchlist
+- **`-o [VALUE]/ --owned [VALUE]`** - Letterboxd Pro-feature: Creates a CSV-file of your movies to import to Letterboxd. The optional parameter VALUE will only export an amount of movies, otherwise it will export all movies. Take a look at Letterboxd faq, section [How do I keep track of films I own?](https://letterboxd.com/about/faq/)
+
 ## Needed Configuration
 
 Edit `config.py` to change your settings.
