@@ -9,24 +9,27 @@ This script will also support the default watchlist. Read `Other features` and `
 Somewhat similar to [PlexImportWatchlist](https://github.com/techkek/PlexImportWatchlist).
 ## How to use
 
-1. Install needed third party libraries: tqdm and PlexAPI.
+1. Install needed third party libraries
 ```
-pip install tqdm plexapi
+pip install -r requirements.txt
 ```
 
-2. Open file `config.py` and edit the fields `baseurl`, aswell as `token`. You can retrieve your token by following the [offical Plex support article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
+2. Open file `config.py` and edit the fields `baseurl`, as well as `token`. You can retrieve your token by following the [official Plex support article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
 
 2.1 **_Optional_**: Change other settings in `config.py` (see section `Configuration`).
 
 3. Export your personal data from [Letterboxd](https://letterboxd.com/data/export/). You can also do this by navigating to your Letterboxd settings page and click on `Import & Export`. This will download a zip file, containing all your data.
-Since the official Letterboxd API is not public, it is not possible to get all information automatically. There is an URL to get the most recent Letterboxd watchlist, but no way to get watched but unrated movies. Maybe I will implement that in the future.
 
 4. Extract data and copy the files `watched.csv`, `watchlist.csv` and `ratings.csv` next to `main.py`.
+
+Or else you can also:
+
+3.1 Update `config.py` and set the field `use_api` to `True`. Also update fields `api_username` and `api_password` to download the zip file automatically.
 
 5. Run `python main.py`
 ## Other features
 
-- You decide whether this script will use the default watchlist or create a brand new playlist. If there is another playlist that you have created previously, you can also skip the movies that were already added to that existing list.
+- You decide whether this script will use the default watchlist or create a brand-new playlist. If there is another playlist that you have created previously, you can also skip the movies that were already added to that existing list.
 - Letterboxd lists some TV shows also. Since this script only supports movies, it will exclude those shows and saves them in a file called `ignore.json`. This will skip those shows and prevents unnecessary API calls in the future.
 - You will add movies to your watchlist that are not on your Plex server yet. This script will add all missing movies to a file called `missing.json`.
 - Unfortunately Plex' search feature is not perfect. Sometimes a search query will find more than one movie in your collection. This script will ask you which of your movies is the correct one. Afterwards it will memorize your decision and stops to ask when running the script again. This information is stored in a file called `autoselection.json`. You can also enter "0" when it asks for the mapping to skip the procedure (e.g. movie is not present but search still finds movies).
@@ -40,6 +43,11 @@ Edit `config.py` to change your settings.
 
 
 ### Optional Configuration
+
+- **`use_api`** - If True: The script will try to sign in to your Letterboxd account and download the zip-file automatically
+- **`api_username`** - Your Letterboxd username to download the zip file 
+- **`api_password`** - Your Letterboxd password
+- **`api_use_2fa_code `** - Set this to True if you have enabled Two-Factor-Authentication
 
 - **`use_playlist_as_watchlist`** - If True: This will create a new playlist with your Letterboxd items
 - **`use_builtin_watchlist`** - If True: All Letterboxd items will get added to the default watchlist on Plex
@@ -84,7 +92,7 @@ Instead of
 
 ---
 
-Map foreign language movies in `mapping.json`:
+Map foreign language movies in `mapping.json`. You can also add the year of the movie if needed:
 ```
 [
    {
@@ -94,6 +102,11 @@ Map foreign language movies in `mapping.json`:
    {
       "letterboxd_title": "Portrait of a Lady on Fire",
       "plex_title": "Portrait de la jeune fille en feu"
-   }
+   },
+   {
+      "letterboxd_title": "Hercules in New York",
+      "plex_title": "Hercules in New York",
+      "year": 1975
+  }
 ]
 ```
