@@ -10,13 +10,13 @@ class Session:
     _cookies = None
     _is_logged_in = False
 
-    def __init__(self, username: str, password: str):
+    def __init__(self, username: str, password: str, use_2fa_code):
         if username is None or password is None:
             raise Exception("Username or password not set.")
 
-        self.sign_in(username, password)
+        self.sign_in(username, password, use_2fa_code)
 
-    def sign_in(self, username, password):
+    def sign_in(self, username, password, use_2fa_code):
         # perform a request to extract csrf token
         response = requests.get(self.LOGIN_URL)
         csrf_pattern = re.compile(r'"csrf":\s*"([^"]+)"')
@@ -41,9 +41,13 @@ class Session:
             "Cookie": f"com.xk72.webparts.csrf={csrf_token};"
         }
 
+        auth_code = ""
+        if use_auth_code:
+            auth_code = input("Enter 2FA code: ")
+
         data = {
             "__csrf": csrf_token,
-            "authenticationCode": "",
+            "authenticationCode": auth_code,
             "username": username,
             "password": password,
             "remember": True

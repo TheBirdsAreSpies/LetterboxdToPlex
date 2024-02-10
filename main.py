@@ -25,7 +25,7 @@ def main():
     if args.watchlist or (args.owned is None and not args.rating):
         if config.use_api:
             zipfile_name = 'letterboxd_export.zip'
-            session = Session(config.api_username, config.api_password)
+            session = Session(config.api_username, config.api_password, config.api_use_2fa_code)
             session.download_export_data(zipfile_name)
 
             with zipfile.ZipFile(zipfile_name, 'r') as zip_ref:
