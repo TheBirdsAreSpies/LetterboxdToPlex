@@ -3,8 +3,8 @@ import config
 import owned
 import watchlist
 import zipfile
+from session import Session
 from plexapi.myplex import PlexServer
-from letterboxd_apy.login import Login
 
 
 def main():
@@ -22,16 +22,15 @@ def main():
                         help='exports movies from Letterboxd watchlist to Plex')
     args = parser.parse_args()
 
-    if config.use_api:
-        zipfile_name = 'letterboxd_export.zip'
-        login = Login(config.api_username, config.api_password)
-        login.sign_in()
-        login.download_export_data(zipfile_name)
-
-        with zipfile.ZipFile(zipfile_name, 'r') as zip_ref:
-            zip_ref.extractall('.')
-
     if args.watchlist or (args.owned is None and not args.rating):
+        if config.use_api:
+            zipfile_name = 'letterboxd_export.zip'
+            session = Session(config.api_username, config.api_password)
+            session.download_export_data(zipfile_name)
+
+            with zipfile.ZipFile(zipfile_name, 'r') as zip_ref:
+                zip_ref.extractall('.')
+
         watchlist.watchlist(plex, movies)
     if args.owned is not None:
         owned.create_csv(movies, args.owned)
