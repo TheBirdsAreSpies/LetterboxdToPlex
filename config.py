@@ -6,6 +6,7 @@ token = 'YOUR_PLEX_TOKEN'
 use_api = False
 api_username = 'USERNAME'
 api_password = 'PASSWORD'
+api_use_2fa_code = False
 
 # general settings
 use_playlist_as_watchlist = True  # creates a playlist by the watchlist on letterboxd
