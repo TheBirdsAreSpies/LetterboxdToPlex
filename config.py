@@ -2,6 +2,11 @@
 baseurl = 'http://127.0.0.1:32400'
 token = 'YOUR_PLEX_TOKEN'
 
+# api
+use_api = False
+api_username = 'USERNAME'
+api_password = 'PASSWORD'
+
 # general settings
 use_playlist_as_watchlist = True  # creates a playlist by the watchlist on letterboxd
 use_builtin_watchlist = False  # uses the builtin watchlist feature in plex

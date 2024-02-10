@@ -11,6 +11,7 @@ from mapping import Mapping
 from movie import Movie
 from tqdm import tqdm
 
+
 def watchlist(plex, movies):
     current_year = datetime.datetime.now().year
     to_ignore = IgnoreMovie.load_json() or []
@@ -115,45 +116,45 @@ def watchlist(plex, movies):
 
             pbar.update(1)
 
-        if config.use_playlist_as_watchlist:
+    if config.use_playlist_as_watchlist:
+        try:
+            playlist = plex.playlist(config.watchlist_name_to_create)
+            playlist.delete()
+            print("\nWatchlist deleted.")
+        except NotFound:
+            print("\nPlaylist not existing yet. No worries, nothing to do.")
+
+        if config.ignore_movies_in_existing_watchlist:
             try:
-                playlist = plex.playlist(config.watchlist_name_to_create)
-                playlist.delete()
-                print("\nWatchlist deleted.")
+                existing_playlist = plex.playlist(config.existing_watchlist_name)
+
+                to_add_cleaned = []
+                for m in to_add:
+                    is_in_playlist = any(
+                        movie.title == m.title and movie.year == m.year for movie in existing_playlist.items())
+                    if not is_in_playlist:
+                        to_add_cleaned.append(m)
+
+                to_add = to_add_cleaned
             except NotFound:
-                print("\nPlaylist not existing yet. No worries, nothing to do.")
+                print("\nExisting watchlist not found!")
 
-            if config.ignore_movies_in_existing_watchlist:
-                try:
-                    existing_playlist = plex.playlist(config.existing_watchlist_name)
+        if config.sort_by_title:
+            to_add = __sort_playlist_ignore_words__(to_add)
 
-                    to_add_cleaned = []
-                    for m in to_add:
-                        is_in_playlist = any(
-                            movie.title == m.title and movie.year == m.year for movie in existing_playlist.items())
-                        if not is_in_playlist:
-                            to_add_cleaned.append(m)
+        plex.createPlaylist(title='Letterboxd Watchlist', items=to_add)
 
-                    to_add = to_add_cleaned
-                except NotFound:
-                    print("\nExisting watchlist not found!")
+    if config.use_builtin_watchlist:
+        account = plex.myPlexAccount()
+        for movie in to_add:
+            try:
+                account.addToWatchlist(movie)
+            except BadRequest:
+                print("\nAlready on watchlist - ignore.")
 
-            if config.sort_by_title:
-                to_add = __sort_playlist_ignore_words__(to_add)
-
-            plex.createPlaylist(title='Letterboxd Watchlist', items=to_add)
-
-        if config.use_builtin_watchlist:
-            account = plex.myPlexAccount()
-            for movie in to_add:
-                try:
-                    account.addToWatchlist(movie)
-                except BadRequest:
-                    print("\nAlready on watchlist - ignore.")
-
-        IgnoreMovie.store_json(to_ignore)
-        MissingMovie.store_json(missing)
-        autoselection.AutoSelection.store_json(autoselector)
+    IgnoreMovie.store_json(to_ignore)
+    MissingMovie.store_json(missing)
+    autoselection.AutoSelection.store_json(autoselector)
 
 
 def _remove_from_missing_if_needed(missing, names):

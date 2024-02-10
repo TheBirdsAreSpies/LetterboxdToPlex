@@ -1,3 +1,6 @@
 tqdm
 plexapi
 requests
+beautifulsoup4
+brotli
+demjson3
