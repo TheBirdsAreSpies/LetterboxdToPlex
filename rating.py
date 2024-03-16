@@ -31,7 +31,6 @@ def rating(plex, movies):
             pbar.set_description(f'Processing {name} ({year})'.ljust(80, ' '))
             was_missing_names = []
 
-            years = [year, str(int(year) - 1), str(int(year) + 1)]
             combination = Movie(name, year)
 
             if any(combination.name == existing.name and combination.year == existing.year for existing in
@@ -46,6 +45,7 @@ def rating(plex, movies):
                 combination = Movie(mapped.plex_title, year)
                 name = combination.name
 
+            years = [year, str(int(year) - 1), str(int(year) + 1)]
             result = movies.search(title=name, year=years)
 
             if len(result) == 1:
