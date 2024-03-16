@@ -51,7 +51,7 @@ def watchlist(plex, movies):
                 pbar.update(1)
                 continue
 
-            mapped = __find_movie_by_letterboxd_title__(mapping, combination.name)
+            mapped = util.find_movie_by_letterboxd_title(mapping, combination.name)
             was_missing_names.append(combination.name)
             if mapped:
                 if mapped.year > -1:
@@ -72,18 +72,18 @@ def watchlist(plex, movies):
 
             if len(result) == 1:
                 to_add.append(result[0])
-                missing = _remove_from_missing_if_needed(missing, was_missing_names)
+                missing = util.remove_from_missing_if_needed(missing, was_missing_names)
 
             elif len(result) > 1:
                 counter = 1
-                preselection = __find_preselection__(autoselector, combination, result)
+                preselection = util.find_preselection(autoselector, combination, result)
 
                 print(f'\nFound multiple movies for {name} ({year}):')
                 if preselection:
                     print(f'Auto selected {preselection.title} ({preselection.year})')
                     to_add.append(preselection)
                     was_missing_names.append(preselection.title)
-                    missing = _remove_from_missing_if_needed(missing, was_missing_names)
+                    missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                 else:
                     for movie in result:
                         print(f'{counter}: {movie.title} ({movie.year})')
@@ -97,7 +97,7 @@ def watchlist(plex, movies):
                         autoselection.AutoSelection.store_json(autoselector)
                         to_add.append(res)
                         was_missing_names.append(res.title)
-                        missing = _remove_from_missing_if_needed(missing, was_missing_names)
+                        missing = util.remove_from_missing_if_needed(missing, was_missing_names)
 
             else:  # len(result) == 0:
                 result = tv_shows.search(title=name)  # to ignore tv shows
@@ -157,26 +157,6 @@ def watchlist(plex, movies):
     autoselection.AutoSelection.store_json(autoselector)
 
 
-def _remove_from_missing_if_needed(missing, names):
-    names_set = set(names)
-    missing = [movie for movie in missing if movie.name not in names_set]
-    return missing
-
-
-def __find_preselection__(autoselector, combination, resultset):
-    key = None
-
-    for selection in autoselector:
-        if selection.combination.name == combination.name:
-            key = selection.movie_to_prefer_key
-            break
-
-    for movie in resultset:
-        if movie.key == key:
-            return movie
-    return None
-
-
 def __read_watchlist_csv__(file_path):
     data = []
 
@@ -198,13 +178,6 @@ def __get_watched_movies_not_rated__():
 
     entries_not_in_ratings = watched_entries - ratings_entries
     return entries_not_in_ratings
-
-
-def __find_movie_by_letterboxd_title__(mapping, letterboxd_title):
-    for obj in mapping:
-        if obj.letterboxd_title == letterboxd_title:
-            return obj
-    return None
 
 
 def __sort_list_ignore_words__(lst):

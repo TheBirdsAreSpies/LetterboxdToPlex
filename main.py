@@ -1,6 +1,7 @@
 import argparse
 import config
 import owned
+import rating
 import watchlist
 import zipfile
 from session import Session
@@ -35,8 +36,7 @@ def main():
     if args.owned is not None:
         owned.create_csv(movies, args.owned)
     if args.rating:
-        # todo implement
-        pass
+        rating.rating(plex, movies)
 
     print("Done")
 
