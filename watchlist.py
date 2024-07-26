@@ -84,7 +84,11 @@ def watchlist(plex, movies):
                     missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                 else:
                     for movie in result:
-                        print(f'{counter}: {movie.title} ({movie.year})')
+                        if movie.editionTitle is None:
+                            print(f'{counter}: {movie.title} ({movie.year})')
+                        else:
+                            print(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
+
                         counter += 1
 
                     selection = int(input('Use:'))
