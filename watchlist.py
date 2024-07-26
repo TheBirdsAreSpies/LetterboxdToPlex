@@ -18,8 +18,6 @@ def watchlist(plex, movies):
     mapping = Mapping.load_json() or []
     autoselector = autoselection.AutoSelection.load_json() or []
 
-    tv_shows = plex.library.section('TV Shows')
-
     data = __read_watchlist_csv__(config.watchlist_path)
     if config.include_watched_not_rated:
         data += __get_watched_movies_not_rated__()
@@ -100,19 +98,10 @@ def watchlist(plex, movies):
                         missing = util.remove_from_missing_if_needed(missing, was_missing_names)
 
             else:  # len(result) == 0:
-                result = tv_shows.search(title=name)  # to ignore tv shows
-
-                if len(result) > 0:  # seems like a tv show, ignore
-                    is_present = any(
-                        combination.name == existing.name and combination.year == existing.year for existing in
-                        to_ignore)
-                    if not is_present:
-                        to_ignore.append(combination)
-                else:
-                    is_present = any(
-                        combination.name == existing.name and combination.year == existing.year for existing in missing)
-                    if not is_present:
-                        missing.append(combination)
+                is_present = any(
+                    combination.name == existing.name and combination.year == existing.year for existing in missing)
+                if not is_present:
+                    missing.append(combination)
 
             pbar.update(1)
 
