@@ -4,6 +4,7 @@ import config
 import csv
 import logging
 import util
+import sqlite3
 
 from mapping import Mapping
 from movie import Movie
@@ -26,11 +27,25 @@ def rating(plex, movies):
 
     data = _read_ratings_csv_()
 
+    connection = sqlite3.connect('ltp.db')
+    cursor = connection.cursor()
+
+    create_table_query = '''
+    CREATE TABLE IF NOT EXISTS ratings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        rating REAL
+    )
+    '''
+
+    cursor.execute(create_table_query)
+    connection.commit()
+
     with tqdm(total=len(data), unit='Movies') as pbar:
         for name, year, stars in data:
             pbar.set_description(f'Processing {name} ({year})'.ljust(80, ' '))
-            was_missing_names = []
 
+            was_missing_names = []
             combination = Movie(name, year)
 
             if any(combination.name == existing.name and combination.year == existing.year for existing in
@@ -38,12 +53,21 @@ def rating(plex, movies):
                 pbar.update(1)
                 continue
 
-            mapped = util.find_movie_by_letterboxd_title(mapping, combination.name)
+            mapped = util.find_movie_by_letterboxd_title(mapping, combination)
             if mapped:
                 if mapped.year > -1:
                     year = mapped.year
                 combination = Movie(mapped.plex_title, year)
                 name = combination.name
+
+            calculated_rating = float(stars) * 2
+
+            select_query = 'SELECT 1 FROM ratings WHERE title = ? AND rating = ?'
+            cursor.execute(select_query, (name, calculated_rating))
+            rs = cursor.fetchone()
+            if rs:
+                pbar.update(1)
+                continue
 
             years = [year, str(int(year) - 1), str(int(year) + 1)]
             result = movies.search(title=name, year=years)
@@ -59,12 +83,16 @@ def rating(plex, movies):
                 print(f'\nFound multiple movies for {name} ({year}):')
                 if preselection:
                     print(f'Auto selected {preselection.title} ({preselection.year})')
+
                     movie = preselection
                     was_missing_names.append(preselection.title)
                     missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                 else:
                     for movie in result:
-                        print(f'{counter}: {movie.title} ({movie.year})')
+                        if movie.editionTitle is None:
+                            print(f'{counter}: {movie.title} ({movie.year})')
+                        else:
+                            print(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
                         counter += 1
 
                     selection = int(input('Use:'))
@@ -95,9 +123,17 @@ def rating(plex, movies):
                 pbar.update(1)
                 continue
 
-            calculated_rating = float(stars) * 2
-            if movie.userRating != calculated_rating:
-                movie.rate(calculated_rating)
+            movie.rate(calculated_rating)
+            if rs:
+                existing_rating = result[0]
+                if existing_rating != calculated_rating:
+                    update_query = 'UPDATE ratings SET rating = ? WHERE title = ?'
+                    cursor.execute(update_query, (calculated_rating, name))
+                    connection.commit()
+            else:
+                insert_query = 'INSERT INTO ratings (title, rating) VALUES (?, ?)'
+                cursor.execute(insert_query, (name, calculated_rating))
+                connection.commit()
 
             pbar.update(1)
 
