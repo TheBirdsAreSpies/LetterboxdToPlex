@@ -5,6 +5,7 @@ import json
 
 class Session:
     LOGIN_URL = "https://letterboxd.com/user/login.do"
+    MAIN_PAGE_URL = "https://letterboxd.com/"
 
     _csrf = None
     _cookies = None
@@ -17,50 +18,32 @@ class Session:
         self.sign_in(username, password, use_2fa_code)
 
     def sign_in(self, username, password, use_2fa_code):
-        # perform a request to extract csrf token
-        response = requests.get(self.LOGIN_URL)
-        csrf_pattern = re.compile(r'"csrf":\s*"([^"]+)"')
-        match = csrf_pattern.search(response.text)
+        session = requests.Session()
 
-        if match:
-            csrf_token = match.group(1)
-            self._csrf = csrf_token
-        else:
-            raise Exception("was not able to extract csrf token")
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                          "Chrome/118.0.0.0 Safari/537.36",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "X-Requested-With": "XMLHttpRequest",
-            "Origin": "https://letterboxd.com",
-            "Referer": "https://letterboxd.com/",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Accept-Language": "de,en-US;q=0.9,en;q=0.8,de-DE;q=0.7,sr;q=0.6,ko;q=0.5",
-            "Cookie": f"com.xk72.webparts.csrf={csrf_token};"
-        }
+        # Simulate initial GET request to obtain CSRF token and cookies from the main page
+        initial_response = session.get(self.MAIN_PAGE_URL)
+        if initial_response.status_code != 200:
+            raise Exception(f"Failed to load main page: {initial_response.status_code}")
+        self._csrf = session.cookies['com.xk72.webparts.csrf']
 
         auth_code = ""
         if use_2fa_code:
             auth_code = input("Enter 2FA code: ")
 
         data = {
-            "__csrf": csrf_token,
+            "__csrf": self._csrf,
             "authenticationCode": auth_code,
             "username": username,
-            "password": password,
-            "remember": True
+            "password": password
         }
 
-        response = requests.post(self.LOGIN_URL, headers=headers, data=data)
-
+        response = session.post(self.LOGIN_URL, data=data)
         if response.status_code == 200:
             response_data = json.loads(response.text)
-            self._is_logged_in = response_data['result'] == 'success'
-            self._cookies = response.cookies
+            self._is_logged_in = response_data.get('result') == 'success'
+            self._cookies = session.cookies
         else:
-            raise Exception('was not able to create a session')
+            raise Exception(f"Was not able to create a session: {response.status_code}")
 
     def _build_headers(self):
         # we have to build a cookies string because setting the param per request does not work somehow
