@@ -51,7 +51,7 @@ def watchlist(plex, movies):
                 pbar.update(1)
                 continue
 
-            mapped = util.find_movie_by_letterboxd_title(mapping, combination.name)
+            mapped = util.find_movie_by_letterboxd_title(mapping, combination)
             was_missing_names.append(combination.name)
             if mapped:
                 if mapped.year > -1:

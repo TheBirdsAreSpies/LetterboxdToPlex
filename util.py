@@ -27,9 +27,9 @@ def find_preselection(autoselector, combination, resultset):
     return None
 
 
-def find_movie_by_letterboxd_title(mapping, letterboxd_title):
+def find_movie_by_letterboxd_title(mapping, combination):
     for obj in mapping:
-        if obj.letterboxd_title == letterboxd_title:
+        if obj.letterboxd_title == combination.name and (obj.year == -1 or str(obj.year) == combination.year):
             return obj
     return None
 
