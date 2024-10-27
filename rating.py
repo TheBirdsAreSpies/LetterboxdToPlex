@@ -13,11 +13,7 @@ from missingmovie import MissingMovie
 from tqdm import tqdm
 
 
-def rating(plex, movies):
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
-    # https://betterstack.com/community/guides/logging/best-python-logging-libraries/
-
+def rating(plex, movies, logger: logging.Logger):
     to_ignore = IgnoreMovie.load_json() or []
     missing = MissingMovie.load_json() or []
     autoselector = autoselection.AutoSelection.load_json() or []
@@ -36,6 +32,7 @@ def rating(plex, movies):
     )
     '''
 
+    logger.debug('Creating table')
     cursor.execute(create_table_query)
     connection.commit()
 
@@ -64,6 +61,7 @@ def rating(plex, movies):
             cursor.execute(select_query, (name, calculated_rating))
             rs = cursor.fetchone()
             if rs:
+                logger.debug(f'Movie {name} is already rated as {calculated_rating} - SKIP')
                 pbar.update(1)
                 continue
 
@@ -78,9 +76,9 @@ def rating(plex, movies):
                 counter = 1
                 preselection = util.find_preselection(autoselector, combination, result)
 
-                print(f'\nFound multiple movies for {name} ({year}):')
+                logger.info(f'Found multiple movies for {name} ({year}):')
                 if preselection:
-                    print(f'Auto selected {preselection.title} ({preselection.year})')
+                    logger.info(f'Auto selected {preselection.title} ({preselection.year})')
 
                     movie = preselection
                     was_missing_names.append(preselection.title)
@@ -88,9 +86,9 @@ def rating(plex, movies):
                 else:
                     for movie in result:
                         if movie.editionTitle is None:
-                            print(f'{counter}: {movie.title} ({movie.year})')
+                            logger.info(f'{counter}: {movie.title} ({movie.year})')
                         else:
-                            print(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
+                            logger.info(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
                         counter += 1
 
                     selection = int(input('Use:'))
@@ -116,20 +114,24 @@ def rating(plex, movies):
             if rs:
                 existing_rating = result[0]
                 if existing_rating != calculated_rating:
+                    logger.debug(f'Updating row: Rating: {calculated_rating} Title: {name}')
                     update_query = 'UPDATE ratings SET rating = ? WHERE title = ?'
                     cursor.execute(update_query, (calculated_rating, name))
                     connection.commit()
+                    logger.debug('Updated')
             else:
+                logger.debug(f'Inserting row row: Rating: {calculated_rating} Title: {name}')
                 insert_query = 'INSERT INTO ratings (title, rating) VALUES (?, ?)'
                 cursor.execute(insert_query, (name, calculated_rating))
                 connection.commit()
+                logger.debug('Inserted')
 
             pbar.update(1)
 
         IgnoreMovie.store_json(to_ignore)
         MissingMovie.store_json(missing)
         autoselection.AutoSelection.store_json(autoselector)
-        print('All ratings imported.')
+        logger.info('All ratings imported.')
 
 
 def _read_ratings_csv_():

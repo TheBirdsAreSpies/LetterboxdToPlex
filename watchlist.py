@@ -1,3 +1,5 @@
+import logging
+
 import config
 import datetime
 import autoselection
@@ -12,11 +14,12 @@ from movie import Movie
 from tqdm import tqdm
 
 
-def watchlist(plex, movies):
+def watchlist(plex, movies, logger: logging.Logger):
     current_year = datetime.datetime.now().year
     to_ignore = IgnoreMovie.load_json() or []
     mapping = Mapping.load_json() or []
     autoselector = autoselection.AutoSelection.load_json() or []
+    logger.info("Started importing watchlist")
 
     data = __read_watchlist_csv__(config.watchlist_path)
     if config.include_watched_not_rated:
@@ -35,14 +38,18 @@ def watchlist(plex, movies):
             skip = False
             combination = Movie(name, year)
             pbar.set_description(f'Processing {name} ({year})'.ljust(80, ' '))
+            logger.debug(f'Processing {name} ({year})')
             was_missing_names = []
 
             if name == '' or year == '':
+                logger.debug(f'Skipping: Name ({name}) or year ({year}) is empty')
                 skip = True
             elif int(year) > current_year:  # skip movies that yet have not been released
+                logger.info(f'Skipping: Movie {name} is not released yet ({year})')
                 skip = True
             elif any(combination.name == existing.name and combination.year == existing.year for existing in
                      to_ignore):  # movie is in ignore list, maybe remove due to the second check after mapping
+                logger.info(f'Skipping: Movie {name} ({year}) should be ignored')
                 skip = True
 
             if skip:
@@ -54,12 +61,14 @@ def watchlist(plex, movies):
             if mapped:
                 if mapped.year > -1:
                     year = mapped.year
+                logger.info(f'Movie {combination.name} ({combination.year}) is mapped to {mapped.plex_title} ({year})')
                 combination = Movie(mapped.plex_title, year)
                 name = combination.name
 
             is_ignored = any(
                 combination.name == existing.name and combination.year == existing.year for existing in to_ignore)
             if is_ignored:
+                logger.info(f'Skipping: Movie {name} ({year}) should be ignored')
                 pbar.update(1)
                 continue
 
@@ -69,24 +78,29 @@ def watchlist(plex, movies):
             was_missing_names.append(name)
 
             if len(result) == 1:
+                logger.debug(f'Found {name} ({year}), will add to watchlist')
                 to_add.append(result[0])
                 missing = util.remove_from_missing_if_needed(missing, was_missing_names)
 
             elif len(result) > 1:
-                counter = 1
                 preselection = util.find_preselection(autoselector, combination, result)
 
-                print(f'\nFound multiple movies for {name} ({year}):')
+                logger.info(f'Found multiple movies for {name} ({year})')
                 if preselection:
-                    print(f'Auto selected {preselection.title} ({preselection.year})')
+                    logger.info(f'Auto selected {preselection.title} ({preselection.year})')
                     to_add.append(preselection)
                     was_missing_names.append(preselection.title)
                     missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                 else:
+                    counter = 1
+                    print(f'\nFound multiple movies for {name} ({year}):')
+
                     for movie in result:
                         if movie.editionTitle is None:
+                            logger.debug(f'{counter}: {movie.title} ({movie.year})')
                             print(f'{counter}: {movie.title} ({movie.year})')
                         else:
+                            logger.debug(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
                             print(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
 
                         counter += 1
@@ -94,6 +108,7 @@ def watchlist(plex, movies):
                     selection = int(input('Use:'))
                     if 0 < selection < len(result) + 1:
                         res = result[selection - 1]
+                        logger.debug(f'WATCHLIST: Selected {counter}: {res.title}')
                         selector = autoselection.AutoSelection(combination, res.key)
                         autoselector.append(selector)
                         autoselection.AutoSelection.store_json(autoselector)
@@ -102,9 +117,11 @@ def watchlist(plex, movies):
                         missing = util.remove_from_missing_if_needed(missing, was_missing_names)
 
             else:  # len(result) == 0:
+                logger.info(f'Movie {name} ({year}) is missing')
                 is_present = any(
                     combination.name == existing.name and combination.year == existing.year for existing in missing)
                 if not is_present:
+                    logger.debug(f'Movie {name} ({year}) added to missing list')
                     missing.append(combination)
 
             pbar.update(1)
@@ -113,9 +130,11 @@ def watchlist(plex, movies):
         try:
             playlist = plex.playlist(config.watchlist_name_to_create)
             playlist.delete()
-            print("\nWatchlist deleted.")
+            logger.info('Watchlist deleted')
+            pbar.write("\nWatchlist deleted.")
         except NotFound:
-            print("\nPlaylist not existing yet. No worries, nothing to do.")
+            logger.info('Playlist not existing yet. No worries, nothing to do.')
+            pbar.write("\nPlaylist not existing yet. No worries, nothing to do.")
 
         if config.ignore_movies_in_existing_watchlist:
             try:
@@ -130,20 +149,23 @@ def watchlist(plex, movies):
 
                 to_add = to_add_cleaned
             except NotFound:
-                print("\nExisting watchlist not found!")
+                logger.warning('Existing watchlist not found!')
+                pbar.write("\nExisting watchlist not found!")
 
         if config.sort_by_title:
             to_add = __sort_playlist_ignore_words__(to_add)
 
         plex.createPlaylist(title='Letterboxd Watchlist', items=to_add)
+        logger.info('Watchlist created')
 
     if config.use_builtin_watchlist:
         account = plex.myPlexAccount()
         for movie in to_add:
             try:
                 account.addToWatchlist(movie)
+                logger.debug(f'Internal Watchlist added {movie.title} ({movie.year})')
             except BadRequest:
-                print("\nAlready on watchlist - ignore.")
+                logger.info('Internal Watchlist already on watchlist - ignore.')
 
     IgnoreMovie.store_json(to_ignore)
     MissingMovie.store_json(missing)

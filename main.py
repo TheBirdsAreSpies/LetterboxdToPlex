@@ -4,11 +4,19 @@ import owned
 import rating
 import watchlist
 import zipfile
+import logging
+
 from session import Session
 from plexapi.myplex import PlexServer
 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.FileHandler('ltp.log', encoding='utf-8')]
+    )
+
     plex = PlexServer(config.baseurl, config.token)
     movies = plex.library.section('Movies')
 
@@ -23,6 +31,9 @@ def main():
                         help='exports movies from Letterboxd watchlist to Plex')
     args = parser.parse_args()
 
+    logger = logging.getLogger('')
+    logger.setLevel(level=logging.INFO)
+
     if args.watchlist or (args.owned is None and not args.rating):
         if config.use_api:
             zipfile_name = 'letterboxd_export.zip'
@@ -32,11 +43,14 @@ def main():
             with zipfile.ZipFile(zipfile_name, 'r') as zip_ref:
                 zip_ref.extractall('.')
 
-        watchlist.watchlist(plex, movies)
+        logger.name = 'WATCHLIST'
+        watchlist.watchlist(plex, movies, logger)
     if args.owned is not None:
-        owned.create_csv(movies, args.owned)
+        logger.name = 'OWNED'
+        owned.create_csv(movies, args.owned, logger)
     if args.rating:
-        rating.rating(plex, movies)
+        logger.name = 'RATING'
+        rating.rating(plex, movies, logger)
 
     print("Done")
 
