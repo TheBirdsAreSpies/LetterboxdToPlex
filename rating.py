@@ -84,11 +84,15 @@ def rating(plex, movies, logger: logging.Logger):
                     was_missing_names.append(preselection.title)
                     missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                 else:
+                    print(f'\nFound multiple movies for {name} ({year}):')
+
                     for movie in result:
                         if movie.editionTitle is None:
                             logger.info(f'{counter}: {movie.title} ({movie.year})')
+                            print(f'{counter}: {movie.title} ({movie.year})')
                         else:
                             logger.info(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
+                            print(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
                         counter += 1
 
                     selection = int(input('Use:'))
