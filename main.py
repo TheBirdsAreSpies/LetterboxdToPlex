@@ -2,6 +2,7 @@ import argparse
 import config
 import owned
 import rating
+import tmdb
 import watchlist
 import zipfile
 import logging
@@ -20,6 +21,13 @@ def main():
     plex = PlexServer(config.baseurl, config.token)
     movies = plex.library.section('Movies')
 
+    # allMovies = movies.search()
+    # for movie in allMovies:
+    #    if not movie.hasCreditsMarker:
+    #        print(movie.title)
+    #        movie.analyze()
+
+
     parser = argparse.ArgumentParser(prog='LetterboxdToPlex',
                                      description='Tool to export movie information from Plex to Letterboxd and vice versa')
     parser.add_argument('-r', '--rating', action='store_true', help='exports Letterboxd ratings to Plex movies')
@@ -33,6 +41,12 @@ def main():
 
     logger = logging.getLogger('')
     logger.setLevel(level=logging.INFO)
+
+    if config.tmdb_use_api:
+        # tmdb.drop_table()
+        tmdb.reorganize_indexes()
+        tmdb.create_table()
+        tmdb.invalidate_cache()
 
     if args.watchlist or (args.owned is None and not args.rating):
         if config.use_api:

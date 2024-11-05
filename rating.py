@@ -5,7 +5,9 @@ import csv
 import logging
 import util
 import sqlite3
+import tmdb
 
+from plexapi.exceptions import NotFound
 from mapping import Mapping
 from movie import Movie
 from ignoremovie import IgnoreMovie
@@ -56,6 +58,7 @@ def rating(plex, movies, logger: logging.Logger):
                 name = combination.name
 
             calculated_rating = float(stars) * 2
+            years = [year, str(int(year) - 1), str(int(year) + 1)]
 
             select_query = 'SELECT 1 FROM ratings WHERE title = ? AND rating = ?'
             cursor.execute(select_query, (name, calculated_rating))
@@ -65,54 +68,95 @@ def rating(plex, movies, logger: logging.Logger):
                 pbar.update(1)
                 continue
 
-            years = [year, str(int(year) - 1), str(int(year) + 1)]
-            result = movies.search(title=name, year=years)
+            if config.tmdb_use_api:
+                logger.debug(f'Trying to look it up on tmdb')
 
-            if len(result) == 1:
-                movie: plexapi.video.Movie = result[0]
-                missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                tmdb_movies = tmdb.search_movie(title=name, year=year)
+                if len(tmdb_movies) == 0:
+                    logger.info('Searched TMDB, was not able to find.')
+                    tmdb_movies = tmdb.search_movie(title=name)
 
-            elif len(result) > 1:
-                counter = 1
-                preselection = util.find_preselection(autoselector, combination, result)
+                tmdb_movie = tmdb_movies[0]
 
-                logger.info(f'Found multiple movies for {name} ({year}):')
-                if preselection:
-                    logger.info(f'Auto selected {preselection.title} ({preselection.year})')
+                logger.info(f'Searched TMDB {name} ({year})')
+                # name = tmdb.translation(tmdb_movie)
+                # year = tmdb_movie.release_date[:4]
+                tmdb_id = tmdb_movie.id
+                combination = Movie(name, year)
 
-                    movie = preselection
-                    was_missing_names.append(preselection.title)
-                    missing = util.remove_from_missing_if_needed(missing, was_missing_names)
-                else:
-                    print(f'\nFound multiple movies for {name} ({year}):')
-
-                    for movie in result:
-                        if movie.editionTitle is None:
-                            logger.info(f'{counter}: {movie.title} ({movie.year})')
-                            print(f'{counter}: {movie.title} ({movie.year})')
+            if config.tmdb_use_api:
+                imdb_id = tmdb.get_imdb_id(tmdb_id)
+                try:
+                    # try to search the movie the normal way first. compare guid then to avoid using movies.getGuid
+                    # because this function is really, really slow af
+                    # search(): 8 - 12 movies/s <> getGuid(): 2 - 4 movies/s
+                    result = movies.search(title=name, year=years)
+                    if len(result) == 1:
+                        guids = getattr(result[0], 'guids', [])
+                        if any(f"imdb://{imdb_id}" in str(guid.id) for guid in guids):
+                            logger.info(f'Found {name} ({year}), will rate')
+                            movie = result[0]
                         else:
-                            logger.info(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
-                            print(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
-                        counter += 1
+                            logger.info(f'Found {name} ({year}) via IMDB ID, will rate')
+                            movie = movies.getGuid(imdb_id)
 
-                    selection = int(input('Use:'))
-                    if 0 < selection < len(result) + 1:
-                        res = result[selection - 1]
-                        movie: plexapi.video.Movie = res
-                        selector = autoselection.AutoSelection(combination, res.key)
-                        autoselector.append(selector)
-                        autoselection.AutoSelection.store_json(autoselector)
-                        was_missing_names.append(res.title)
                         missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                except NotFound:
+                    logger.info(f'Movie {name} ({year}) is missing')
+                    is_present = any(
+                        combination.name == existing.name and combination.year == existing.year for existing in missing)
+                    if not is_present:
+                        logger.debug(f'Movie {name} ({year}) added to missing list')
+                        missing.append(combination)
+            else:  # old way
+                result = movies.search(title=name, year=years)
 
-            else:
-                is_present = any(
-                    combination.name == existing.name and combination.year == existing.year for existing in missing)
-                if not is_present:
-                    missing.append(combination)
+                if len(result) == 1:
+                    logger.info(f'Found {name} ({year}), will rate')
+                    movie: plexapi.video.Movie = result[0]
+                    missing = util.remove_from_missing_if_needed(missing, was_missing_names)
 
-                pbar.update(1)
-                continue
+                elif len(result) > 1:
+                    counter = 1
+                    preselection = util.find_preselection(autoselector, combination, result)
+
+                    logger.info(f'Found multiple movies for {name} ({year}):')
+                    if preselection:
+                        logger.info(f'Auto selected {preselection.title} ({preselection.year})')
+
+                        movie = preselection
+                        was_missing_names.append(preselection.title)
+                        missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                    else:
+                        print(f'\nFound multiple movies for {name} ({year}):')
+
+                        for movie in result:
+                            if movie.editionTitle is None:
+                                logger.info(f'{counter}: {movie.title} ({movie.year})')
+                                print(f'{counter}: {movie.title} ({movie.year})')
+                            else:
+                                logger.info(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
+                                print(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
+                            counter += 1
+
+                        selection = int(input('Use:'))
+                        if 0 < selection < len(result) + 1:
+                            res = result[selection - 1]
+                            movie: plexapi.video.Movie = res
+                            selector = autoselection.AutoSelection(combination, res.key)
+                            autoselector.append(selector)
+                            autoselection.AutoSelection.store_json(autoselector)
+                            was_missing_names.append(res.title)
+                            missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+
+                else:
+                    is_present = any(
+                        combination.name == existing.name and combination.year == existing.year for existing in missing)
+                    if not is_present:
+                        missing.append(combination)
+
+                    pbar.update(1)
+                    continue
 
             movie.rate(calculated_rating)
             if rs:
