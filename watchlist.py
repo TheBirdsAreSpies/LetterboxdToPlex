@@ -38,7 +38,7 @@ def watchlist(plex, movies, logger: logging.Logger):
             skip = False
             combination = Movie(name, year)
             pbar.set_description(f'Processing {name} ({year})'.ljust(80, ' '))
-            logger.debug(f'Processing {name} ({year})')
+            logger.info(f'Processing {name} ({year})')
             was_missing_names = []
 
             if name == '' or year == '':
@@ -76,11 +76,15 @@ def watchlist(plex, movies, logger: logging.Logger):
                 #     tmdb_movie = tmdb_movies[int(selection) - 1]
 
                 logger.info(f'Searched TMDB {name} ({year})')
+                org_title = name
+                org_year = year
+
                 # I think only tmdb_id is needed at this state. Whatever - this is not the bottleneck.
                 name = tmdb.translation(tmdb_movie)
                 year = tmdb_movie.release_date[:4]
                 combination = Movie(name, year)
                 tmdb_id = tmdb_movie.id
+                tmdb.store_to_cache(name, year, org_title, org_year, tmdb_id)
 
             manually_mapped = util.find_movie_by_letterboxd_title(mapping, combination)
 
@@ -120,10 +124,12 @@ def watchlist(plex, movies, logger: logging.Logger):
                         if any(f"imdb://{imdb_id}" in str(guid.id) for guid in guids):
                             logger.info(f'Found {name} ({year}), will add to watchlist')
                             to_add.append(result[0])
-                        else:
-                            result = movies.getGuid(imdb_id)
-                            logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
-                            to_add.append(result)
+
+                            missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                    else:
+                        result = movies.getGuid(imdb_id)
+                        logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
+                        to_add.append(result)
 
                         missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                 except NotFound:

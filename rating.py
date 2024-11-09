@@ -79,10 +79,14 @@ def rating(plex, movies, logger: logging.Logger):
                 tmdb_movie = tmdb_movies[0]
 
                 logger.info(f'Searched TMDB {name} ({year})')
+                org_title = name
+                org_year = year
+
                 # name = tmdb.translation(tmdb_movie)
                 # year = tmdb_movie.release_date[:4]
                 tmdb_id = tmdb_movie.id
                 combination = Movie(name, year)
+                tmdb.store_to_cache(name, year, org_title, org_year, tmdb_id)
 
             if config.tmdb_use_api:
                 imdb_id = tmdb.get_imdb_id(tmdb_id)
@@ -96,9 +100,11 @@ def rating(plex, movies, logger: logging.Logger):
                         if any(f"imdb://{imdb_id}" in str(guid.id) for guid in guids):
                             logger.info(f'Found {name} ({year}), will rate')
                             movie = result[0]
-                        else:
-                            logger.info(f'Found {name} ({year}) via IMDB ID, will rate')
-                            movie = movies.getGuid(imdb_id)
+
+                            missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                    else:
+                        logger.info(f'Found {name} ({year}) via IMDB ID, will rate')
+                        movie = movies.getGuid(imdb_id)
 
                         missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                 except NotFound:

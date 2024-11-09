@@ -249,10 +249,6 @@ def search_movie(title: str, year: int = None):
     data = json.loads(response.text)
     movies = MovieResponse(data)
 
-    if config.tmdb_cache and len(movies.results) > 0:
-        movie = movies.results[0]
-        store_to_cache(movie.title, movie.release_date, title, str(year), movie.id)
-
     return movies.results
 
 
