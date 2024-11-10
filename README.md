@@ -77,7 +77,7 @@ Edit `config.py` to change your settings.
 | **autoselection_path**                  | The path of the created `autoselection.json`                                                                                                                                |
 
 
-#### 📺 TMDB
+#### 📺 TMDB & Letterboxdpy
 
 The Movie DB is the great website Letterboxd is getting its metadata from. They also provide an API you can use to look up metadata yourself.
 You can use the API to map movies Plex cannot find automatically (take a look at `Other information`). Long story short: This will avoid creating 
@@ -85,6 +85,12 @@ a `mapping.json` file.
 You have to create a TMDB account and claim an [API](https://developer.themoviedb.org/reference/intro/getting-started) key. Set `tmdb_use_api` to `True`
 and set your setting `tmdb_api_key` to your received Bearer Token.  
 I recommend to set `tmdb_cache` to `True` to minimize traffic and API calls.
+
+**Warning: The first run will incredibly slow**  
+Since Letterboxd is using the film premiere date and the search function of TMDB the primary release date, there is another library in use: letterboxdpy.  
+This tool will extract the shortened Letterboxd url of the CSV files and uses Letterboxdpy to extract the TMDB id (and cache it). Then it will try
+to search TMDB. If the movie was found (both release dates are the same in that case), the movie is getting compared to the TMDB id and if they are equal,
+the movie is getting added. Otherwise, it will search for the TMDB id directly - _which is pretty slow_.
 
 
 | Setting                        | Description                                                                                             |
@@ -124,6 +130,8 @@ This option will import your set rating from letterboxd to your local Plex libra
 [PlexAPI](https://github.com/pkkid/python-plexapi/)
 
 [tqdm](https://github.com/tqdm/tqdm)
+
+[letterboxdpy](https://github.com/nmcassa/letterboxdpy)
 
 
 ## Examples

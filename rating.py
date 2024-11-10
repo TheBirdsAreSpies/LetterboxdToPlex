@@ -6,6 +6,7 @@ import logging
 import util
 import sqlite3
 import tmdb
+import letterboxd
 
 from plexapi.exceptions import NotFound
 from mapping import Mapping
@@ -39,7 +40,7 @@ def rating(plex, movies, logger: logging.Logger):
     connection.commit()
 
     with tqdm(total=len(data), unit='Movies') as pbar:
-        for name, year, stars in data:
+        for name, year, stars, uri in data:
             pbar.set_description(f'Processing {name} ({year})'.ljust(80, ' '))
 
             was_missing_names = []
@@ -70,6 +71,12 @@ def rating(plex, movies, logger: logging.Logger):
 
             if config.tmdb_use_api:
                 logger.debug(f'Trying to look it up on tmdb')
+                slug = letterboxd.slug_from_short_url(uri)
+                ids = letterboxd.ids_from_slug(slug)
+                tmdb_id = ids[0]
+                # imdb_id = ids[1]
+                # logger.info(f'Got TMDB id {tmdb_id} and IMDB id {imdb_id}')
+                logger.info(f'Got TMDB id {tmdb_id}')
 
                 tmdb_movies = tmdb.search_movie(title=name, year=year)
                 if len(tmdb_movies) == 0:
@@ -82,29 +89,40 @@ def rating(plex, movies, logger: logging.Logger):
                 org_title = name
                 org_year = year
 
-                # name = tmdb.translation(tmdb_movie)
-                # year = tmdb_movie.release_date[:4]
-                tmdb_id = tmdb_movie.id
-                combination = Movie(name, year)
+                # I think only tmdb_id is needed at this state. Whatever - this is not the bottleneck.
+                name = tmdb.translation(tmdb_movie)
+                year = tmdb_movie.release_date[:4]
+                # combination = Movie(name, year)
+                # tmdb_id = tmdb_movie.id
                 tmdb.store_to_cache(name, year, org_title, org_year, tmdb_id)
 
             if config.tmdb_use_api:
-                imdb_id = tmdb.get_imdb_id(tmdb_id)
+                # imdb_id = tmdb.get_imdb_id(tmdb_id)
+
                 try:
                     # try to search the movie the normal way first. compare guid then to avoid using movies.getGuid
                     # because this function is really, really slow af
                     # search(): 8 - 12 movies/s <> getGuid(): 2 - 4 movies/s
-                    result = movies.search(title=name, year=years)
-                    if len(result) == 1:
-                        guids = getattr(result[0], 'guids', [])
-                        if any(f"imdb://{imdb_id}" in str(guid.id) for guid in guids):
-                            logger.info(f'Found {name} ({year}), will rate')
-                            movie = result[0]
+                    tmdb_result = movies.search(title=name)
+                    if len(tmdb_result) > 0:
+                        for result in tmdb_result:
+                            guids = getattr(result, 'guids', [])
+                            # if any(f"imdb://{imdb_id}" in str(guid.id) for guid in guids):
+                            if any(f"tmdb://{tmdb_id}" in str(guid.id) for guid in guids):
+                                logger.info(f'Found {name} ({year}), will add to watchlist')
 
-                            missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                                movie = result
+                                missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                                break
+                            else:
+                                if len(tmdb_result) == 1:  # getGuid makes only sense, when there is only one result
+                                    # result = movies.getGuid(imdb_id)
+                                    movie = movies.getGuid(f'tmdb://{tmdb_id}')
+                                    logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
                     else:
-                        logger.info(f'Found {name} ({year}) via IMDB ID, will rate')
-                        movie = movies.getGuid(imdb_id)
+                        # result = movies.getGuid(imdb_id)
+                        movie = movies.getGuid(f'tmdb://{tmdb_id}')
+                        logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
 
                         missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                 except NotFound:
@@ -197,5 +215,5 @@ def _read_ratings_csv_():
         next(reader)  # skip header
         for row in reader:
             date, name, year, uri, stars = row
-            data.append((name, year, stars))
+            data.append((name, year, stars, uri))
     return data

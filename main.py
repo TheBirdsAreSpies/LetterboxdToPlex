@@ -1,5 +1,6 @@
 import argparse
 import config
+import letterboxd
 import owned
 import rating
 import tmdb
@@ -47,6 +48,7 @@ def main():
         tmdb.reorganize_indexes()
         tmdb.create_table()
         tmdb.invalidate_cache()
+        letterboxd.create_table()
 
     if args.watchlist or (args.owned is None and not args.rating):
         if config.use_api:

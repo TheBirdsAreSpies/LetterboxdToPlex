@@ -3,6 +3,7 @@ import config
 import datetime
 import autoselection
 import csv
+import letterboxd
 import tmdb
 import util
 
@@ -34,7 +35,7 @@ def watchlist(plex, movies, logger: logging.Logger):
     to_add = []
 
     with tqdm(total=len(sorted_data), unit='Movies') as pbar:
-        for name, year in sorted_data:
+        for name, year, uri in sorted_data:
             skip = False
             combination = Movie(name, year)
             pbar.set_description(f'Processing {name} ({year})'.ljust(80, ' '))
@@ -58,6 +59,12 @@ def watchlist(plex, movies, logger: logging.Logger):
 
             if config.tmdb_use_api:
                 logger.debug(f'Trying to look it up on tmdb')
+                slug = letterboxd.slug_from_short_url(uri)
+                ids = letterboxd.ids_from_slug(slug)
+                tmdb_id = ids[0]
+                # imdb_id = ids[1]
+                # logger.info(f'Got TMDB id {tmdb_id} and IMDB id {imdb_id}')
+                logger.info(f'Got TMDB id {tmdb_id}')
 
                 tmdb_movies = tmdb.search_movie(title=name, year=year)
                 if len(tmdb_movies) == 0:
@@ -65,15 +72,6 @@ def watchlist(plex, movies, logger: logging.Logger):
                     tmdb_movies = tmdb.search_movie(title=name)
 
                 tmdb_movie = tmdb_movies[0]
-                # if len(tmdb_movies) > 1:
-                #     i = 1
-                #     print(f'\nMultiple entries on TMDB found.')
-                #
-                #     for tmdb_movie in tmdb_movies:
-                #         print(f'\n{i}: {tmdb_movie.title} ({tmdb_movie.original_title}) ({tmdb_movie.release_date})')
-                #         i += 1
-                #     selection = input("Use: ")
-                #     tmdb_movie = tmdb_movies[int(selection) - 1]
 
                 logger.info(f'Searched TMDB {name} ({year})')
                 org_title = name
@@ -82,8 +80,8 @@ def watchlist(plex, movies, logger: logging.Logger):
                 # I think only tmdb_id is needed at this state. Whatever - this is not the bottleneck.
                 name = tmdb.translation(tmdb_movie)
                 year = tmdb_movie.release_date[:4]
-                combination = Movie(name, year)
-                tmdb_id = tmdb_movie.id
+                # combination = Movie(name, year)
+                # tmdb_id = tmdb_movie.id
                 tmdb.store_to_cache(name, year, org_title, org_year, tmdb_id)
 
             manually_mapped = util.find_movie_by_letterboxd_title(mapping, combination)
@@ -112,22 +110,32 @@ def watchlist(plex, movies, logger: logging.Logger):
             years = [year, str(int(year) - 1), str(int(year) + 1)]
 
             if config.tmdb_use_api:
-                imdb_id = tmdb.get_imdb_id(tmdb_id)
+                # imdb_id = tmdb.get_imdb_id(tmdb_id)
 
                 try:
                     # try to search the movie the normal way first. compare guid then to avoid using movies.getGuid
                     # because this function is really, really slow af
                     # search(): 8 - 12 movies/s <> getGuid(): 2 - 4 movies/s
-                    result = movies.search(title=name, year=years)
-                    if len(result) == 1:
-                        guids = getattr(result[0], 'guids', [])
-                        if any(f"imdb://{imdb_id}" in str(guid.id) for guid in guids):
-                            logger.info(f'Found {name} ({year}), will add to watchlist')
-                            to_add.append(result[0])
+                    tmdb_result = movies.search(title=name)
+                    if len(tmdb_result) > 0:
+                        for result in tmdb_result:
+                            guids = getattr(result, 'guids', [])
+                            # if any(f"imdb://{imdb_id}" in str(guid.id) for guid in guids):
+                            if any(f"tmdb://{tmdb_id}" in str(guid.id) for guid in guids):
+                                logger.info(f'Found {name} ({year}), will add to watchlist')
+                                to_add.append(result)
 
-                            missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                                missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                                break
+                            else:
+                                if len(tmdb_result) == 1:  # getGuid makes only sense, when there is only one result
+                                    # result = movies.getGuid(imdb_id)
+                                    result = movies.getGuid(f'tmdb://{tmdb_id}')
+                                    logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
+                                    to_add.append(result)
                     else:
-                        result = movies.getGuid(imdb_id)
+                        # result = movies.getGuid(imdb_id)
+                        result = movies.getGuid(f'tmdb://{tmdb_id}')
                         logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
                         to_add.append(result)
 
@@ -245,7 +253,7 @@ def __read_watchlist_csv__(file_path):
         next(reader)  # skip header
         for row in reader:
             date, name, year, uri = row
-            data.append((name, year))
+            data.append((name, year, uri))
     return data
 
 
@@ -253,8 +261,8 @@ def __get_watched_movies_not_rated__():
     watched_data = util.read_general_csv(config.watched_path)
     ratings_data = util.read_general_csv(config.ratings_path)
 
-    watched_entries = set((row['Name'], row['Year']) for row in watched_data)
-    ratings_entries = set((row['Name'], row['Year']) for row in ratings_data)
+    watched_entries = set((row['Name'], row['Year'], row['Letterboxd URI']) for row in watched_data)
+    ratings_entries = set((row['Name'], row['Year'], row['Letterboxd URI']) for row in ratings_data)
 
     entries_not_in_ratings = watched_entries - ratings_entries
     return entries_not_in_ratings
