@@ -22,13 +22,6 @@ def main():
     plex = PlexServer(config.baseurl, config.token)
     movies = plex.library.section('Movies')
 
-    # allMovies = movies.search()
-    # for movie in allMovies:
-    #    if not movie.hasCreditsMarker:
-    #        print(movie.title)
-    #        movie.analyze()
-
-
     parser = argparse.ArgumentParser(prog='LetterboxdToPlex',
                                      description='Tool to export movie information from Plex to Letterboxd and vice versa')
     parser.add_argument('-r', '--rating', action='store_true', help='exports Letterboxd ratings to Plex movies')
