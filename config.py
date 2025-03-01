@@ -27,6 +27,8 @@ tmdb_invalidate_cache = False
 tmdb_invalidate_cache_days = 30
 tmdb_api_key = 'YOUR_TMDB_TOKEN'
 tmdb_language_code = 'DE'  # Look up Alpha-2 codes: https://en.wikipedia.org/wiki/ISO_3166-1#Codes
+tmdb_release_country_code = 'US'
+tmdb_release_type: tmdb.ReleaseType = tmdb.ReleaseType.DIGITAL
 
 # existing files, used from letterboxd export
 watchlist_path = 'watchlist.csv'
