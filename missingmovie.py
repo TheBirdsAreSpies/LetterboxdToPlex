@@ -15,6 +15,7 @@ class MissingMovie(Movie):
                 items = []
                 for data in data_list:
                     item = MissingMovie(data["name"], data["year"])
+                    item.release_date = data["release_date"]
                     items.append(item)
 
                 return items

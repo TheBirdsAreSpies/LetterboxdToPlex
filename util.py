@@ -16,7 +16,7 @@ def find_preselection(autoselector, combination, resultset):
     key = None
 
     for selection in autoselector:
-        if selection.combination.name == combination.name\
+        if selection.combination.name == combination.name \
                 and selection.combination.year == combination.year:
             key = selection.movie_to_prefer_key
             break

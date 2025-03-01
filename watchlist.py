@@ -80,9 +80,14 @@ def watchlist(plex, movies, logger: logging.Logger):
                 # I think only tmdb_id is needed at this state. Whatever - this is not the bottleneck.
                 name = tmdb.translation(tmdb_movie)
                 year = tmdb_movie.release_date[:4]
+
+                if year == '':  # could happen if there is no rls-date on tmdb
+                    pbar.update(1)
+                    continue
+                    
                 # combination = Movie(name, year)
                 # tmdb_id = tmdb_movie.id
-                tmdb.store_to_cache(name, year, org_title, org_year, tmdb_id)
+                tmdb.store_movie_to_cache(name, year, org_title, org_year, tmdb_id)
 
             manually_mapped = util.find_movie_by_letterboxd_title(mapping, combination)
 
@@ -134,7 +139,6 @@ def watchlist(plex, movies, logger: logging.Logger):
                                     logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
                                     to_add.append(result)
                     else:
-                        # result = movies.getGuid(imdb_id)
                         result = movies.getGuid(f'tmdb://{tmdb_id}')
                         logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
                         to_add.append(result)
@@ -142,10 +146,21 @@ def watchlist(plex, movies, logger: logging.Logger):
                         missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                 except NotFound:
                     logger.info(f'Movie {name} ({year}) is missing')
-                    is_present = any(
-                        combination.name == existing.name and combination.year == existing.year for existing in missing)
-                    if not is_present:
-                        logger.debug(f'Movie {name} ({year}) added to missing list')
+                    # is_present = any(
+                    #     combination.name == existing.name and combination.year == existing.year for existing in missing)
+                    # if not is_present:
+                    #     logger.debug(f'Movie {name} ({year}) added to missing list')
+                    #     combination.release_date = tmdb.release_date(tmdb_id)
+                    #     missing.append(combination)
+                    for existing in missing:
+                        if combination.name == existing.name and combination.year == existing.year:
+                            if existing.release_date is None:
+                                logger.debug(f'Updating release_date for movie {existing.name} ({existing.year})')
+                                existing.release_date = tmdb.release_date(tmdb_id)
+                            break
+                    else:
+                        logger.debug(f'Movie {combination.name} ({combination.year}) added to missing list')
+                        combination.release_date = tmdb.release_date(tmdb_id)
                         missing.append(combination)
             else:  # old way
                 result = movies.search(title=name, year=years)
@@ -228,8 +243,11 @@ def watchlist(plex, movies, logger: logging.Logger):
         if config.sort_by_title:
             to_add = __sort_playlist_ignore_words__(to_add)
 
-        plex.createPlaylist(title='Letterboxd Watchlist', items=to_add)
-        logger.info('Watchlist created')
+        if len(to_add) > 0:
+            plex.createPlaylist(title='Letterboxd Watchlist', items=to_add)
+            logger.info('Watchlist created')
+        else:
+            logger.info('Nothing to add.')
 
     if config.use_builtin_watchlist:
         account = plex.myPlexAccount()

@@ -1,8 +1,46 @@
 import json
 import urllib.parse
 import requests
+
 import config
 import sqlite3
+
+from enum import Enum
+from datetime import datetime
+
+
+class ReleaseType(Enum):
+    PREMIERE = 1
+    THEATRICAL_LIMITED = 2
+    THEATRICAL = 3
+    DIGITAL = 4
+    PHYSICAL = 5
+    TV = 6
+
+
+class ReleaseDate:
+    def __init__(self, data):
+        self.certification = data.get("certification", "")
+        self.descriptors = data.get("descriptors", [])
+        self.iso_639_1 = data.get("iso_639_1", "")
+        self.note = data.get("note", "")
+        self.release_date = datetime.fromisoformat(data["release_date"].replace("Z", "+00:00"))
+        self.type = data.get("type", 0)
+
+
+class ReleaseCountry:
+    def __init__(self, data):
+        self.iso_3166_1 = data.get("iso_3166_1", "")
+        self.release_dates = [ReleaseDate(rd) for rd in data.get("release_dates", [])]
+
+    def __repr__(self):
+        return f'{self.iso_3166_1}: {self.release_dates}'
+
+
+class MovieReleaseInfo:
+    def __init__(self, data):
+        self.id = data.get("id", 0)
+        self.results = [ReleaseCountry(rc) for rc in data.get("results", [])]
 
 
 class Movie:
@@ -115,6 +153,20 @@ def create_table():
     connection = sqlite3.connect('ltp.db')
     cursor = connection.cursor()
     cursor.execute(create_table_query)
+
+    create_table_query = '''
+    CREATE TABLE IF NOT EXISTS tmdb_releases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        release_id INTEGER NOT NULL,
+        release_date DATE NOT NULL,
+        tmdb_id TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    '''
+    cursor = connection.cursor()
+    cursor.execute(create_table_query)
+
     connection.commit()
     connection.close()
 
@@ -178,8 +230,8 @@ def get_imdb_id(movie_id: str):
     return None
 
 
-def store_to_cache(tmdb_translated_title: str, tmdb_release_date: str,
-                   lb_title: str, lb_date: str, tmdb_id: str = None):
+def store_movie_to_cache(tmdb_translated_title: str, tmdb_release_date: str,
+                         lb_title: str, lb_date: str, tmdb_id: str = None):
     connection = sqlite3.connect('ltp.db')
     cursor = connection.cursor()
 
@@ -250,6 +302,27 @@ def search_movie(title: str, year: int = None):
     movies = MovieResponse(data)
 
     return movies.results
+
+
+def release_date(movie_id: str):
+    url = f"https://api.themoviedb.org/3/movie/{movie_id}/release_dates"
+    headers = __get_headers()
+    response = requests.get(url, headers=headers)
+
+    if response.status_code != 200:
+        return None
+
+    data = json.loads(response.text)
+    movie_release_info = MovieReleaseInfo(data)
+    filtered_release = [rd for country in movie_release_info.results
+                        if country.iso_3166_1 == config.tmdb_release_country_code
+                        for rd in country.release_dates
+                        if rd.type == config.tmdb_release_type.value]
+
+    if len(filtered_release) > 0:
+        return str(filtered_release[0].release_date)
+    else:
+        return None
 
 
 def __get_movie_details(movie_id: str):

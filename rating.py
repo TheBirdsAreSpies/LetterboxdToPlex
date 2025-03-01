@@ -94,7 +94,7 @@ def rating(plex, movies, logger: logging.Logger):
                 year = tmdb_movie.release_date[:4]
                 # combination = Movie(name, year)
                 # tmdb_id = tmdb_movie.id
-                tmdb.store_to_cache(name, year, org_title, org_year, tmdb_id)
+                tmdb.store_movie_to_cache(name, year, org_title, org_year, tmdb_id)
 
             if config.tmdb_use_api:
                 # imdb_id = tmdb.get_imdb_id(tmdb_id)
