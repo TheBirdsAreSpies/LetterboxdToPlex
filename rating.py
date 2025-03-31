@@ -59,7 +59,6 @@ def rating(plex, movies, logger: logging.Logger):
                 name = combination.name
 
             calculated_rating = float(stars) * 2
-            years = [year, str(int(year) - 1), str(int(year) + 1)]
 
             select_query = 'SELECT 1 FROM ratings WHERE title = ? AND rating = ?'
             cursor.execute(select_query, (name, calculated_rating))
@@ -133,6 +132,7 @@ def rating(plex, movies, logger: logging.Logger):
                         logger.debug(f'Movie {name} ({year}) added to missing list')
                         missing.append(combination)
             else:  # old way
+                years = [year, str(int(year) - 1), str(int(year) + 1)]
                 result = movies.search(title=name, year=years)
 
                 if len(result) == 1:
