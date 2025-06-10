@@ -1,6 +1,7 @@
 # plex settings
 baseurl = 'http://127.0.0.1:32400'
 token = 'YOUR_PLEX_TOKEN'
+import tmdb
 
 # letterboxd api
 use_api = False
