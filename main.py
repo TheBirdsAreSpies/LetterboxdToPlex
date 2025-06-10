@@ -38,8 +38,8 @@ def main():
 
     if config.tmdb_use_api:
         # tmdb.drop_table()
-        tmdb.reorganize_indexes()
         tmdb.create_table()
+        tmdb.reorganize_indexes()
         tmdb.invalidate_cache()
         letterboxd.create_table()
 
