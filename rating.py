@@ -82,6 +82,11 @@ def rating(plex, movies, logger: logging.Logger):
                     logger.info('Searched TMDB, was not able to find.')
                     tmdb_movies = tmdb.search_movie(title=name)
 
+                # seems like a tv show, skip
+                if len(tmdb_movies) == 0:
+                    pbar.update(1)
+                    continue
+
                 tmdb_movie = tmdb_movies[0]
 
                 logger.info(f'Searched TMDB {name} ({year})')
@@ -183,6 +188,7 @@ def rating(plex, movies, logger: logging.Logger):
                     continue
 
             movie.rate(calculated_rating)
+
             if rs:
                 existing_rating = result[0]
                 if existing_rating != calculated_rating:
@@ -194,7 +200,7 @@ def rating(plex, movies, logger: logging.Logger):
             else:
                 logger.debug(f'Inserting row row: Rating: {calculated_rating} Title: {name}')
                 insert_query = 'INSERT INTO ratings (title, rating) VALUES (?, ?)'
-                cursor.execute(insert_query, (name, calculated_rating))
+                cursor.execute(insert_query, (org_title, calculated_rating))
                 connection.commit()
                 logger.debug('Inserted')
 
