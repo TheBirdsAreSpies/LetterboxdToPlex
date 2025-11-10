@@ -1,4 +1,9 @@
 import argparse
+import os
+import json
+import logging
+from flask import Flask, render_template_string, jsonify, request, send_file
+
 import config
 import letterboxd
 import owned
@@ -6,13 +11,209 @@ import rating
 import tmdb
 import watchlist
 import zipfile
-import logging
 
 from session import Session
 from plexapi.myplex import PlexServer
 
+app = Flask(__name__)
+
+MISSING_FILE = "missing.json"
+IGNORE_FILE = "ignore.json"
+
+plex = None
+movies = None
+
+
+def load_json(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=3, ensure_ascii=False)
+
+def run_watchlist(logger):
+    if config.use_api:
+        zipfile_name = 'letterboxd_export.zip'
+        session = Session(config.api_username, config.api_password, config.api_use_2fa_code)
+        session.download_export_data(zipfile_name)
+
+        with zipfile.ZipFile(zipfile_name, 'r') as zip_ref:
+            zip_ref.extractall('.')
+
+    logger.name = 'WATCHLIST'
+    watchlist.watchlist(plex, movies, logger)
+    return "Imported watchlist"
+
+
+def run_owned(logger, amount=-1):
+    logger.name = 'OWNED'
+    owned.create_csv(movies, amount, logger)
+    return "Created owned list"
+
+
+def run_rating(logger):
+    logger.name = 'RATING'
+    rating.rating(plex, movies, logger)
+    return "Updated ratings"
+
+
+@app.route("/")
+def index():
+    missing = load_json(MISSING_FILE)
+    html = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>LetterboxdToPlex Web</title>
+        <style>
+            body { font-family: sans-serif; margin: 2rem; background: #fafafa; }
+            table { border-collapse: collapse; width: 100%; box-shadow: 0 0 6px rgba(0,0,0,0.1); background: white; }
+            th, td { border: 1px solid #ddd; padding: 0.6rem; text-align: left; }
+            th { background: #eee; }
+            button { padding: 0.4rem 0.8rem; cursor: pointer; background: #444; color: white; border: none; border-radius: 4px; }
+            button:hover { background: #000; }
+            .danger { background: #d33; }
+            .danger:hover { background: #a00; }
+            .action-bar { margin-bottom: 1.5rem; }
+            #status { padding: 0.8rem; background: #eef; border-radius: 5px; margin-bottom: 1rem; display:none; }
+        </style>
+    </head>
+    <body>
+        <h1>LetterboxdToPlex Web</h1>
+        
+        <div id="status"></div>
+
+        <div class="action-bar">
+            <button onclick="runAction('watchlist')">Synchronize Watchlist</button>
+            <button onclick="runAction('owned')">Create Owned List</button>
+            <button onclick="runAction('rating')">Update Ratings</button>
+        </div>
+        
+        <h2>Missing Movies</h2>
+        {% if missing %}
+        <table>
+            <tr>
+                <th>Title</th>
+                <th>Year</th>
+                <th>Release Date</th>
+                <th>Actions</th>
+            </tr>
+            {% for item in missing %}
+            <tr>
+                <td>{{ item.name }}</td>
+                <td>{{ item.year }}</td>
+                <td>
+                    {% if item.release_date %}
+                        {{ item.release_date.split('T')[0].split(' ')[0] }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td><button class="danger" onclick="ignoreItem('{{ item.name }}')">Ignore Movie</button></td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p>No missing movies</p>
+        {% endif %}
+        
+        <script>
+        async function runAction(name) {
+            const status = document.getElementById('status');
+            status.style.display = 'block';
+            status.style.background = '#eef';
+            status.innerText = 'Starting ' + name + '...';
+        
+            try {
+                if (name === "owned") {
+                    const res = await fetch('/action/' + name, { method: 'POST' });
+                    const blob = await res.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'owned.csv';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                    status.innerText = "Owned CSV downloaded";
+                    status.style.background = '#e6ffe6';
+                } else {
+                    const res = await fetch('/action/' + name, { method: 'POST' });
+                    const data = await res.json();
+                    status.innerText = data.message;
+                    status.style.background = '#e6ffe6';
+                }
+            } catch (err) {
+                status.innerText = 'Error: ' + err;
+                status.style.background = '#ffe6e6';
+            }
+        }
+
+        async function ignoreItem(name) {
+            if (!confirm('Do you really want to add „' + name + '“ to ignore list?')) return;
+            const res = await fetch('/ignore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            if (res.ok) location.reload();
+        }
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html, missing=missing)
+
+
+@app.route("/ignore", methods=["POST"])
+def ignore():
+    data = request.get_json()
+    name = data.get("name")
+
+    missing = load_json(MISSING_FILE)
+    ignore_list = load_json(IGNORE_FILE)
+
+    for item in missing:
+        if item["name"] == name:
+            ignore_list.append(item)
+            missing.remove(item)
+            break
+
+    save_json(MISSING_FILE, missing)
+    save_json(IGNORE_FILE, ignore_list)
+    return jsonify(success=True)
+
+
+@app.route("/action/<name>", methods=["POST"])
+def action(name):
+    logger = logging.getLogger('')
+    logger.setLevel(logging.INFO)
+
+    try:
+        if name == "watchlist":
+            msg = run_watchlist(logger)
+            return jsonify(success=True, message=msg)
+        elif name == "owned":
+            csv_file = run_owned(logger)
+            return send_file(csv_file, as_attachment=True)
+        elif name == "rating":
+            msg = run_rating(logger)
+            return jsonify(success=True, message=msg)
+        else:
+            return jsonify(success=False, message="Unknown action")
+    except Exception as e:
+        return jsonify(success=False, message=f"Error: {e}")
+
 
 def main():
+    global plex, movies
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -31,35 +232,29 @@ def main():
                              'will get processed')
     parser.add_argument('-w', '--watchlist', action='store_true',
                         help='exports movies from Letterboxd watchlist to Plex')
+    parser.add_argument('--web', action='store_true', help='starting web server')
     args = parser.parse_args()
+
+    if args.web:
+        print("Starting server http://localhost:5000 ...")
+        app.run(debug=True, port=5000)
+        return
 
     logger = logging.getLogger('')
     logger.setLevel(level=logging.INFO)
 
     if config.tmdb_use_api:
-        # tmdb.drop_table()
         tmdb.create_table()
         tmdb.reorganize_indexes()
         tmdb.invalidate_cache()
         letterboxd.create_table()
 
     if args.watchlist or (args.owned is None and not args.rating):
-        if config.use_api:
-            zipfile_name = 'letterboxd_export.zip'
-            session = Session(config.api_username, config.api_password, config.api_use_2fa_code)
-            session.download_export_data(zipfile_name)
-
-            with zipfile.ZipFile(zipfile_name, 'r') as zip_ref:
-                zip_ref.extractall('.')
-
-        logger.name = 'WATCHLIST'
-        watchlist.watchlist(plex, movies, logger)
+        run_watchlist(logger)
     if args.owned is not None:
-        logger.name = 'OWNED'
-        owned.create_csv(movies, args.owned, logger)
+        run_owned(logger, args.owned)
     if args.rating:
-        logger.name = 'RATING'
-        rating.rating(plex, movies, logger)
+        run_rating(logger)
 
     print("Done")
 

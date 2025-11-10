@@ -7,3 +7,4 @@ demjson3
 letterboxdpy
 git+https://github.com/nmcassa/letterboxdpy.git
 lxml
+flask
