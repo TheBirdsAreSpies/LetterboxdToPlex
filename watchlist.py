@@ -124,6 +124,17 @@ def watchlist(plex, movies, logger: logging.Logger):
                     tmdb_result = movies.search(title=name)
                     if len(tmdb_result) > 0:
                         for result in tmdb_result:
+                            # if len(tmdb_result) > 1:
+                            # TODO implement
+                            # preselection = util.find_preselection(autoselector, combination, result)
+                            #
+                            # logger.info(f'Found multiple movies for {name} ({year})')
+                            # if preselection:
+                            #     logger.info(f'Auto selected {preselection.title} ({preselection.year})')
+                            #     to_add.append(preselection)
+                            #     was_missing_names.append(preselection.title)
+                            #     missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+
                             guids = getattr(result, 'guids', [])
                             # if any(f"imdb://{imdb_id}" in str(guid.id) for guid in guids):
                             if any(f"tmdb://{tmdb_id}" in str(guid.id) for guid in guids):
@@ -146,12 +157,6 @@ def watchlist(plex, movies, logger: logging.Logger):
                         missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                 except NotFound:
                     logger.info(f'Movie {name} ({year}) is missing')
-                    # is_present = any(
-                    #     combination.name == existing.name and combination.year == existing.year for existing in missing)
-                    # if not is_present:
-                    #     logger.debug(f'Movie {name} ({year}) added to missing list')
-                    #     combination.release_date = tmdb.release_date(tmdb_id)
-                    #     missing.append(combination)
                     for existing in missing:
                         if combination.name == existing.name and combination.year == existing.year:
                             if existing.release_date is None:
