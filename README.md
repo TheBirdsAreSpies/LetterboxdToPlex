@@ -38,7 +38,7 @@ Or else you can also:
 - You decide whether this script will use the default watchlist or create a brand-new playlist. If there is another playlist that you have created previously, you can also skip the movies that were already added to that existing list.
 - Letterboxd lists some TV shows also. Since this script only supports movies, it will exclude those shows and saves them in a file called `ignore.json`. This will skip those shows and prevents unnecessary API calls in the future.
 - You will add movies to your watchlist that are not on your Plex server yet. This script will add all missing movies to a file called `missing.json`.
-- Unfortunately Plex' search feature is not perfect. Sometimes a search query will find more than one movie in your collection. This script will ask you which of your movies is the correct one. After that it will memorize your decision and stops to ask when running the script again. This information is stored in a file called `autoselection.json`. You can also enter "0" when it asks for the mapping to skip the procedure (e.g. movie is not present but search still finds movies).
+- Unfortunately Plex's search feature is not perfect. Sometimes a search query will find more than one movie in your collection. This script will ask you which of your movies is the correct one. After that it will memorize your decision and stops to ask when running the script again. This information is stored in a file called `autoselection.json`. You can also enter "0" when it asks for the mapping to skip the procedure (e.g. movie is not present but search still finds movies).
 - Since Letterboxd stores all of its information in English, this script may encounter difficulties in finding foreign language movies. You can map those movies yourself and this script will find them in the next run. The most easy way is to cut the entry from `missing.json` and copy it to `mapping.json`. Besides that, you have to enter the correct titles. Take a look to `Examples`. Take a look at `TMDB`.
 
 
@@ -77,16 +77,16 @@ Edit `config.py` to change your settings.
 | **autoselection_path**                  | The path of the created `autoselection.json`                                                                                                                                |
 
 
-#### 📺 TMDB & Letterboxdpy
+#### 📺 TMDB & Letterboxdpy (recommended)
 
 The Movie DB is the great website Letterboxd is getting its metadata from. They also provide an API you can use to look up metadata yourself.
-You can use the API to map movies Plex cannot find automatically (take a look at `Other information`). Long story short: This will avoid creating 
+You can use the API to map movies Plex cannot find automatically (take a look at `Other information`). Long story short: This will avoid using 
 a `mapping.json` file.  
 You have to create a TMDB account and claim an [API](https://developer.themoviedb.org/reference/intro/getting-started) key. Set `tmdb_use_api` to `True`
 and set your setting `tmdb_api_key` to your received Bearer Token.  
 I recommend to set `tmdb_cache` to `True` to minimize traffic and API calls.
 
-**Warning: The first run will incredibly slow**  
+**Warning: The first run will be incredibly slow**  
 Since Letterboxd is using the film premiere date and the search function of TMDB the primary release date, there is another library in use: letterboxdpy.  
 This tool will extract the shortened Letterboxd url of the CSV files and uses Letterboxdpy to extract the TMDB id (and cache it). Then it will try
 to search TMDB. If the movie was found (both release dates are the same in that case), the movie is getting compared to the TMDB id and if they are equal,
@@ -105,11 +105,12 @@ the movie is getting added. Otherwise, it will search for the TMDB id directly -
 
 ## Script parameters
 
-| Parameter                            | Description                                                                                                                                                                                      |
-|--------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **-w** / **--watchlist**             | Creates a watchlist on Plex, based on your Letterboxd watchlist                                                                                                                                  |
-| **-o** [value] / **--owned** [value] | **Letterboxd Pro-feature**: Creates a CSV-file of your movies to import to Letterboxd. The optional parameter [value] will only export an amount of movies, otherwise it will export all movies. |
-| **-r** / **--rating**                | Imports your letterboxd movie ratings to your local library                                                                                                                                      |
+| Parameter                            | Description                                                                                                                                                                                       |
+|--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **-w** / **--watchlist**             | Creates a watchlist on Plex, based on your Letterboxd watchlist                                                                                                                                   |
+| **-o** [value] / **--owned** [value] | **Letterboxd Pro-feature**: Creates a CSV-file of your movies to import to Letterboxd. The optional parameter [value] will only export an amount of movies, otherwise it will export all movies.  |
+| **-r** / **--rating**                | Imports your letterboxd movie ratings to your local library                                                                                                                                       |
+| **--web**                            | Starts an web interface                                                                                                                                                                           |
 
 
 ### Parameter `owned`
@@ -123,7 +124,10 @@ For further information, take a look at Letterboxd FAQ, section [How do I keep t
 
 This option will import your set rating from letterboxd to your local Plex library. Additionally, this will store all ratings to a local sqlite database to improve speed, so only new ratings will get imported.
 
+## Web interface
 
+You can also run this with a web interface, where you can ignore movies easily. Run with argument **--web**.
+There is also a page to change your config.
 
 ## Used libraries
 
