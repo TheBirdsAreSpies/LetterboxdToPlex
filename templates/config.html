@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Edit Config</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+body {
+    font-family: 'Inter', sans-serif;
+    background: #f0f2f5;
+    margin: 0;
+    padding: 2rem;
+    color: #333;
+}
+h1 {
+    text-align: center;
+    margin-bottom: 2rem;
+    color: #222;
+}
+form {
+    max-width: 1000px;
+    margin: auto;
+}
+.section {
+    background: white;
+    padding: 1rem 1.5rem;
+    margin-bottom: 1rem;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.08);
+    transition: all 0.3s ease;
+}
+.section h2 {
+    margin: 0;
+    font-size: 1.2rem;
+    display: flex;
+    justify-content: space-between;
+    cursor: pointer;
+}
+.section-content {
+    margin-top: 0.8rem;
+}
+label {
+    display: block;
+    margin-top: 0.6rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+input, select, textarea {
+    width: 100%;
+    padding: 0.5rem;
+    margin-bottom: 0.7rem;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 0.95rem;
+    transition: all 0.2s;
+}
+input[type="checkbox"] {
+    width: auto;
+    margin-right: 0.5rem;
+}
+input.changed, select.changed, textarea.changed {
+    border-color: #4CAF50;
+    background-color: #e6ffe6;
+}
+button {
+    padding: 0.6rem 1.2rem;
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    background: #4CAF50;
+    color: white;
+    font-weight: 600;
+    font-size: 1rem;
+    margin-top: 1rem;
+    transition: background 0.2s;
+}
+button:hover {
+    background: #45a049;
+}
+#status {
+    margin-top: 1rem;
+    padding: 0.8rem;
+    border-radius: 6px;
+    display: none;
+    font-weight: 600;
+}
+.toggle-btn {
+    font-size: 0.9rem;
+    color: #555;
+    background: #eee;
+    border: none;
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+}
+.toggle-btn:hover {
+    background: #ddd;
+}
+</style>
+</head>
+<body>
+<h1>Edit Config</h1>
+
+<form id="configForm"></form>
+
+<button onclick="window.location.href='/'">Back</button>
+<button onclick="saveConfig()">Save Config</button>
+
+<div id="status"></div>
+
+<script>
+const sections = {
+    "plex settings": ["baseurl", "token"],
+    "letterboxd settings": ["use_api", "api_username", "api_password", "api_use_2fa_code"],
+    "general settings": ["use_playlist_as_watchlist","use_builtin_watchlist","sort_by_title",
+                         "ignore_words","ignore_movies_in_existing_watchlist","include_watched_not_rated"],
+    "plex watchlist as playlist settings": ["existing_watchlist_name","watchlist_name_to_create"],
+    "tmdb": ["tmdb_use_api","tmdb_cache","tmdb_invalidate_cache","tmdb_invalidate_cache_days",
+             "tmdb_api_key","tmdb_language_code","tmdb_release_country_code","tmdb_release_type"],
+    "existing files": ["watchlist_path","watched_path","ratings_path"],
+    "files to create": ["missing_path","ignore_path","mapping_path","autoselection_path"]
+};
+
+async function loadConfig() {
+    const res = await fetch('/config/data');
+    const cfg = await res.json();
+
+    const form = document.getElementById('configForm');
+    form.innerHTML = '';
+
+    for (const [sectionName, keys] of Object.entries(sections)) {
+        const sectionDiv = document.createElement('div');
+        sectionDiv.className = 'section';
+
+        const h2 = document.createElement('h2');
+        h2.textContent = sectionName;
+
+        const toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.textContent = 'Toggle';
+        toggleBtn.className = 'toggle-btn';
+        toggleBtn.onclick = () => {
+            contentDiv.style.display = contentDiv.style.display === 'none' ? 'block' : 'none';
+        };
+        h2.appendChild(toggleBtn);
+        sectionDiv.appendChild(h2);
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'section-content';
+
+        for (const key of keys) {
+            if (!(key in cfg)) continue;
+            const value = cfg[key];
+            const label = document.createElement('label');
+            label.textContent = key;
+            label.htmlFor = key;
+
+            let input;
+            if (key === 'tmdb_release_type') {
+                input = document.createElement('select');
+                input.id = key;
+                input.name = key;
+                const enumValues = ["ReleaseType.PREMIERE",
+                                    "ReleaseType.THEATRICAL_LIMITED",
+                                    "ReleaseType.THEATRICAL",
+                                    "ReleaseType.DIGITAL",
+                                    "ReleaseType.PHYSICAL",
+                                    "ReleaseType.TV"];
+                enumValues.forEach(ev => {
+                    const opt = document.createElement('option');
+                    opt.value = ev;
+                    opt.textContent = ev.split('.')[1];
+                    if (ev === value) opt.selected = true;
+                    input.appendChild(opt);
+                });
+            } else if (typeof value === 'boolean') {
+                input = document.createElement('input');
+                input.type = 'checkbox';
+                input.id = key;
+                input.name = key;
+                input.checked = value;
+            } else if (Array.isArray(value)) {
+                input = document.createElement('textarea');
+                input.id = key;
+                input.name = key;
+                input.value = value.join(', ');
+            } else {
+                input = document.createElement('input');
+                input.type = 'text';
+                input.id = key;
+                input.name = key;
+                input.value = value;
+            }
+
+            // highlight changes
+            const originalValue = value;
+            input.addEventListener('input', () => {
+                let changed = false;
+                if (input.type === 'checkbox') changed = input.checked !== originalValue;
+                else if (input.tagName === 'TEXTAREA') changed = input.value.split(',').map(v=>v.trim()).join() !== originalValue.join();
+                else changed = input.value !== originalValue;
+                input.classList.toggle('changed', changed);
+            });
+
+            contentDiv.appendChild(label);
+            contentDiv.appendChild(input);
+        }
+
+        sectionDiv.appendChild(contentDiv);
+        form.appendChild(sectionDiv);
+    }
+}
+
+async function saveConfig() {
+    const form = document.getElementById('configForm');
+    const data = {};
+
+    for (const [sectionName, keys] of Object.entries(sections)) {
+        for (const key of keys) {
+            const el = document.getElementById(key);
+            if (!el) continue;
+            let value;
+            if (el.type === 'checkbox') value = el.checked;
+            else if (el.tagName === 'TEXTAREA') value = el.value.split(',').map(v => v.trim());
+            else value = el.value;
+
+            data[key] = value;
+        }
+    }
+
+    // Convert enum string back to enum if needed
+    if (data.tmdb_release_type) {
+        const enumStr = data.tmdb_release_type.split('.')[1];
+        data.tmdb_release_type = "ReleaseType." + enumStr;
+    }
+
+    const res = await fetch('/config/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+
+    const result = await res.json();
+    const status = document.getElementById('status');
+    status.style.display = 'block';
+    status.innerText = result.message;
+    status.style.background = result.success ? '#e6ffe6' : '#ffe6e6';
+}
+
+loadConfig();
+</script>
+</body>
+</html>

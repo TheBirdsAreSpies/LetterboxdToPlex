@@ -154,6 +154,7 @@ autoselection.json
 ignore.json
 mapping.json
 missing.json
+config.json
 *.csv
 *.zip
 ltp.db
