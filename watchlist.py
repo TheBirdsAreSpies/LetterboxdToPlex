@@ -15,11 +15,12 @@ from movie import Movie
 from tqdm import tqdm
 
 
-def watchlist(plex, movies, logger: logging.Logger):
+def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
     current_year = datetime.datetime.now().year
     to_ignore = IgnoreMovie.load_json() or []
     mapping = Mapping.load_json() or []
     autoselector = autoselection.AutoSelection.load_json() or []
+
     logger.info("Started importing watchlist")
 
     data = __read_watchlist_csv__(config.watchlist_path)
@@ -40,6 +41,8 @@ def watchlist(plex, movies, logger: logging.Logger):
             combination = Movie(name, year)
             pbar.set_description(f'Processing {name} ({year})'.ljust(80, ' '))
             logger.info(f'Processing {name} ({year})')
+            progress_callback(f'Processing {name} ({year})')
+
             was_missing_names = []
 
             if name == '' or year == '':
@@ -225,9 +228,12 @@ def watchlist(plex, movies, logger: logging.Logger):
             playlist.delete()
             logger.info('Watchlist deleted')
             pbar.write("\nWatchlist deleted.")
+            progress_callback("Watchlist deleted.")
         except NotFound:
             logger.info('Playlist not existing yet. No worries, nothing to do.')
             pbar.write("\nPlaylist not existing yet. No worries, nothing to do.")
+            progress_callback("Playlist not existing yet. No worries, nothing to do.")
+
 
         if config.ignore_movies_in_existing_watchlist:
             try:
@@ -244,6 +250,7 @@ def watchlist(plex, movies, logger: logging.Logger):
             except NotFound:
                 logger.warning('Existing watchlist not found!')
                 pbar.write("\nExisting watchlist not found!")
+                progress_callback("Existing watchlist not found!")
 
         if config.sort_by_title:
             to_add = __sort_playlist_ignore_words__(to_add)
@@ -266,6 +273,8 @@ def watchlist(plex, movies, logger: logging.Logger):
     IgnoreMovie.store_json(to_ignore)
     MissingMovie.store_json(missing)
     autoselection.AutoSelection.store_json(autoselector)
+
+    progress_callback("Synchronized Watchlist")
 
 
 def __read_watchlist_csv__(file_path):

@@ -2,7 +2,9 @@ import argparse
 import os
 import json
 import logging
-from flask import Flask, render_template_string, jsonify, request, send_file
+from flask import Flask, render_template_string, jsonify, request, send_file, Response
+import queue
+import threading
 
 import config
 import letterboxd
@@ -16,9 +18,10 @@ from session import Session
 from plexapi.myplex import PlexServer
 
 app = Flask(__name__)
+progress_queues = {}
 
-MISSING_FILE = "missing.json"
-IGNORE_FILE = "ignore.json"
+MISSING_FILE = config.missing_path
+IGNORE_FILE = config.ignore_path
 
 plex = None
 movies = None
@@ -35,7 +38,8 @@ def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=3, ensure_ascii=False)
 
-def run_watchlist(logger):
+
+def run_watchlist(logger, progress_callback=None):
     if config.use_api:
         zipfile_name = 'letterboxd_export.zip'
         session = Session(config.api_username, config.api_password, config.api_use_2fa_code)
@@ -45,7 +49,7 @@ def run_watchlist(logger):
             zip_ref.extractall('.')
 
     logger.name = 'WATCHLIST'
-    watchlist.watchlist(plex, movies, logger)
+    watchlist.watchlist(plex, movies, logger, progress_callback)
     return "Imported watchlist"
 
 
@@ -86,7 +90,7 @@ def index():
     <body>
         <h1>LetterboxdToPlex Web</h1>
         
-        <div id="status"></div>
+        <div id="status" style="overflow-y:auto; max-height:300px; border:1px solid #ccc; padding:0.5rem; background:#eef;"></div>
 
         <div class="action-bar">
             <button onclick="runAction('watchlist')">Synchronize Watchlist</button>
@@ -96,11 +100,11 @@ def index():
         
         <h2>Missing Movies</h2>
         {% if missing %}
-        <table>
+        <table id="missingTable">
             <tr>
-                <th>Title</th>
-                <th>Year</th>
-                <th>Release Date</th>
+                <th onclick="sortTable(0)">Title ▲▼</th>
+                <th onclick="sortTable(1)">Year ▲▼</th>
+                <th onclick="sortTable(2)">Release Date ▲▼</th>
                 <th>Actions</th>
             </tr>
             {% for item in missing %}
@@ -149,6 +153,35 @@ def index():
                     status.innerText = data.message;
                     status.style.background = '#e6ffe6';
                 }
+                
+                const MAX_LINES = 50;
+                let logLines = [];
+                if (name === "watchlist") {
+                    await fetch('/action/watchlist', { method: 'POST' });
+            
+                    const eventSource = new EventSource('/stream/watchlist');
+                    status.innerHTML = "";
+            
+                    eventSource.onmessage = function (event) {
+                        // Keep only the last MAX_LINES
+                        logLines.push(event.data);
+                        if (logLines.length > MAX_LINES) {
+                            logLines = logLines.slice(logLines.length - MAX_LINES);
+                        }
+                        status.innerHTML = logLines.join('<br>');
+                        status.scrollTop = status.scrollHeight; // auto scroll
+                    };
+
+                    eventSource.onerror = function () {
+                        eventSource.close();
+                        logLines.push("Stream ended or error occurred");
+                        if (logLines.length > MAX_LINES) {
+                            logLines = logLines.slice(logLines.length - MAX_LINES);
+                        }
+                        status.innerHTML = logLines.join('<br>');
+                        status.scrollTop = status.scrollHeight;
+                    };
+                }
             } catch (err) {
                 status.innerText = 'Error: ' + err;
                 status.style.background = '#ffe6e6';
@@ -163,6 +196,29 @@ def index():
                 body: JSON.stringify({ name })
             });
             if (res.ok) location.reload();
+        }
+        
+        function sortTable(colIndex) {
+            const table = document.getElementById("missingTable");
+            const rows = Array.from(table.rows).slice(1);
+            let asc = table.getAttribute(`data-sort-col`) != colIndex || table.getAttribute(`data-sort-dir`) == "desc";
+            
+            rows.sort((a, b) => {
+                let aText = a.cells[colIndex].innerText.trim();
+                let bText = b.cells[colIndex].innerText.trim();
+        
+                let aNum = parseFloat(aText), bNum = parseFloat(bText);
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return asc ? aNum - bNum : bNum - aNum;
+                }
+        
+                return asc ? aText.localeCompare(bText) : bText.localeCompare(aText);
+            });
+        
+            rows.forEach(row => table.appendChild(row));
+        
+            table.setAttribute("data-sort-col", colIndex);
+            table.setAttribute("data-sort-dir", asc ? "asc" : "desc");
         }
         </script>
     </body>
@@ -197,8 +253,21 @@ def action(name):
 
     try:
         if name == "watchlist":
-            msg = run_watchlist(logger)
-            return jsonify(success=True, message=msg)
+            q = queue.Queue()
+            progress_queues['watchlist'] = q
+
+            def progress_callback(msg):
+                q.put(msg)
+
+            def run_task():
+                try:
+                    run_watchlist(logger, progress_callback)
+                finally:
+                    q.put(None)
+
+            threading.Thread(target=run_task).start()
+
+            return jsonify(success=True)
         elif name == "owned":
             csv_file = run_owned(logger)
             return send_file(csv_file, as_attachment=True)
@@ -209,6 +278,22 @@ def action(name):
             return jsonify(success=False, message="Unknown action")
     except Exception as e:
         return jsonify(success=False, message=f"Error: {e}")
+
+
+@app.route("/stream/watchlist")
+def stream_watchlist():
+    q = progress_queues.get('watchlist')
+    if not q:
+        return "No watchlist running", 404
+
+    def generate():
+        while True:
+            msg = q.get()
+            if msg is None:
+                break
+            yield f"data: {msg}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream')
 
 
 def main():
