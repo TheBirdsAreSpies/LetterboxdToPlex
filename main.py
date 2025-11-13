@@ -2,11 +2,12 @@ import argparse
 import os
 import json
 import logging
+import queue
+import threading
+import time
 
 from flask import Flask, jsonify, request, send_file, Response, render_template
 from enum import Enum
-import queue
-import threading
 
 import config
 import letterboxd
@@ -15,6 +16,8 @@ import rating
 import tmdb
 import watchlist
 import zipfile
+import selector
+import autoselection
 
 from session import Session
 from plexapi.myplex import PlexServer
@@ -37,30 +40,40 @@ def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=3, ensure_ascii=False)
 
+def lb_export():
+    zipfile_name = 'letterboxd_export.zip'
+    skip_download = False
 
-def run_watchlist(logger, progress_callback=None):
-    if config.use_api:
-        zipfile_name = 'letterboxd_export.zip'
+    if os.path.exists(zipfile_name):
+        mtime = os.path.getmtime(zipfile_name)
+        age_seconds = time.time() - mtime
+        if age_seconds < 5 * 60:
+            skip_download = True
+
+    if not skip_download:
         session = Session(config.api_username, config.api_password, config.api_use_2fa_code)
         session.download_export_data(zipfile_name)
 
+    if os.path.exists(zipfile_name):
         with zipfile.ZipFile(zipfile_name, 'r') as zip_ref:
             zip_ref.extractall('.')
+
+def run_watchlist(logger, progress_callback=None):
+    lb_export()
 
     logger.name = 'WATCHLIST'
     watchlist.watchlist(plex, movies, logger, progress_callback)
     return "Imported watchlist"
 
-
-def run_owned(logger, amount=-1):
+def run_owned(logger, amount=200):
     logger.name = 'OWNED'
-    owned.create_csv(movies, amount, logger)
-    return "Created owned list"
+    return owned.create_csv(movies, amount, logger)
 
+def run_rating(logger, progress_callback=None):
+    lb_export()
 
-def run_rating(logger):
     logger.name = 'RATING'
-    rating.rating(plex, movies, logger)
+    rating.rating(plex, movies, logger, progress_callback)
     return "Updated ratings"
 
 @app.route("/")
@@ -91,26 +104,40 @@ def action(name):
     logger = logging.getLogger('')
     logger.setLevel(logging.INFO)
 
-    if name == "watchlist":
-        if 'watchlist' in progress_queues and progress_queues['watchlist'] is not None:
-            return jsonify(success=False, message="Watchlist sync already running")
+    if name not in ["watchlist", "owned", "rating"]:
+        return jsonify(success=False, message=f"Unknown action '{name}'")
+
+    if name in ["watchlist", "rating"]:
+        # threaded actions
+        if name in progress_queues and progress_queues[name] is not None:
+            return jsonify(success=False, message=f"{name.capitalize()} task already running")
 
         q = queue.Queue()
-        progress_queues['watchlist'] = q
+        progress_queues[name] = q
 
         def progress_callback(msg):
             q.put(msg)
 
         def run_task():
             try:
-                run_watchlist(logger, progress_callback)
+                if name == "watchlist":
+                    run_watchlist(logger, progress_callback)
+                elif name == "rating":
+                    run_rating(logger, progress_callback)
             finally:
                 q.put(None)
-                progress_queues['watchlist'] = None  # mark done
+                progress_queues[name] = None  # mark done
 
         threading.Thread(target=run_task, daemon=True).start()
-        return jsonify(success=True)
+        return jsonify(success=True, message=f"{name.capitalize()} task started")
 
+    elif name == "owned":
+        csv_data = run_owned(logger)
+        return Response(
+            csv_data,
+            mimetype="text/csv",
+            headers={"Content-Disposition": "attachment; filename=owned.csv"}
+        )
 
 @app.route("/stream/watchlist")
 def stream_watchlist():
@@ -164,6 +191,83 @@ def config_save():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
 
+@app.route("/autoselections")
+def get_autoselections():
+    # return all pending selections as JSON
+    l = []
+    for sel in selector.selection_requests.values():
+        combination = sel["combination"]
+        combination_dict = {
+            "name": combination.name,
+            "year": combination.year
+        }
+        l.append({
+            "combination": combination_dict,
+            "options": sel["options"]
+        })
+    return jsonify(l)
+
+@app.route("/autoselections/choose", methods=["POST"])
+def choose_autoselection():
+    try:
+        data = request.get_json()
+        combo_name = data.get("name")
+        combo_year = data.get("year")
+        selected_key = data.get("selected_key")
+
+        key_to_set_event = None
+
+        for sel_id, sel in list(selector.selection_requests.items()):
+            combo = sel["combination"]
+            if combo.name == combo_name and combo.year == combo_year:
+                from autoselection import AutoSelection
+                autoselector = AutoSelection.load_json() or []
+                autoselector.append(AutoSelection(combo, selected_key))
+                AutoSelection.store_json(autoselector)
+
+                key_to_set_event = combo.name
+
+                del selector.selection_requests[sel_id]
+                break
+
+        # signal waiting thread
+        if key_to_set_event and key_to_set_event in selector.selection_events:
+            selector.selection_results[key_to_set_event] = selected_key
+            selector.selection_events[key_to_set_event].set()
+
+        return jsonify(success=True, message=f"Selected {combo_name} ({combo_year})")
+
+    except Exception as e:
+        return jsonify(success=False, message=str(e))
+
+@app.route("/autoselections/skip", methods=["POST"])
+def autoselection_skip():
+    try:
+        data = request.get_json()
+
+        name = data.get("name")
+        year = data.get("year")
+
+        removed = False
+        key_to_set_event = None
+        for key, sel in list(selector.selection_requests.items()):
+            if sel['combination'].name == name and sel['combination'].year == year:
+                del selector.selection_requests[key]
+                removed = True
+                key_to_set_event = sel['combination'].name
+                break
+
+        # Trigger the event to unblock choose_movie
+        if key_to_set_event and key_to_set_event in selector.selection_events:
+            selector.selection_results[key_to_set_event] = None  # indicate skipped
+            selector.selection_events[key_to_set_event].set()  # unblock the waiting thread
+
+        if removed:
+            return jsonify(success=True, message=f"Skipped {name} ({year})")
+        else:
+            return jsonify(success=False, message="Selection not found")
+    except Exception as e:
+        return jsonify(success=False, message=str(e))
 
 def main():
     global plex, movies
@@ -193,6 +297,8 @@ def main():
     movies = plex.library.section('Movies')
 
     if args.web:
+        config.web_mode = True
+
         print("Starting server http://localhost:5000 ...")
         app.run(debug=False, port=5000)
         return

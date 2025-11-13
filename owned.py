@@ -1,10 +1,11 @@
 import csv
 import logging
+import io
 
 from tqdm import tqdm
 
 
-def create_csv(movies, max_results, logger: logging.Logger):
+def create_csv(movies, max_results, logger: logging.Logger, filename="owned.csv"):
     to_export = []
 
     if max_results <= 0:
@@ -23,12 +24,22 @@ def create_csv(movies, max_results, logger: logging.Logger):
                     to_export.append(comb)
                     logger.info(f'Appended {movie.title}')
                     break
-
             pbar.update(1)
 
-    with open("owned.csv", mode="w", newline="", encoding="utf-8") as csv_file:
+    # Save CSV to disk
+    with open(filename, mode="w", newline="", encoding="utf-8") as csv_file:
         csv_writer = csv.writer(csv_file, delimiter=',')
         csv_writer.writerow(["Title", "imdbID"])
         for m in to_export:
-            logger.info(f'Appending row {m}')
             csv_writer.writerow(m)
+    logger.info(f"CSV saved to {filename}")
+
+    # Also return CSV content as string for download
+    output = io.StringIO()
+    csv_writer = csv.writer(output, delimiter=',')
+    csv_writer.writerow(["Title", "imdbID"])
+    for m in to_export:
+        csv_writer.writerow(m)
+    output.seek(0)
+    return output.getvalue()
+

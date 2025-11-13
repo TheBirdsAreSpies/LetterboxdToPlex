@@ -7,6 +7,7 @@ import util
 import sqlite3
 import tmdb
 import letterboxd
+from selector import choose_movie
 
 from plexapi.exceptions import NotFound
 from mapping import Mapping
@@ -16,7 +17,7 @@ from missingmovie import MissingMovie
 from tqdm import tqdm
 
 
-def rating(plex, movies, logger: logging.Logger):
+def rating(plex, movies, logger: logging.Logger, progress_callback=None):
     to_ignore = IgnoreMovie.load_json() or []
     missing = MissingMovie.load_json() or []
     autoselector = autoselection.AutoSelection.load_json() or []
@@ -42,6 +43,7 @@ def rating(plex, movies, logger: logging.Logger):
     with tqdm(total=len(data), unit='Movies') as pbar:
         for name, year, stars, uri in data:
             pbar.set_description(f'Processing {name} ({year})'.ljust(80, ' '))
+            progress_callback(f'Processing {name} ({year})')
 
             was_missing_names = []
             combination = Movie(name, year)
@@ -100,42 +102,100 @@ def rating(plex, movies, logger: logging.Logger):
                 # tmdb_id = tmdb_movie.id
                 tmdb.store_movie_to_cache(name, year, org_title, org_year, tmdb_id)
 
+            # if config.tmdb_use_api:
+            #     # imdb_id = tmdb.get_imdb_id(tmdb_id)
+            #
+            #     try:
+            #         # try to search the movie the normal way first. compare guid then to avoid using movies.getGuid
+            #         # because this function is really, really slow af
+            #         # search(): 8 - 12 movies/s <> getGuid(): 2 - 4 movies/s
+            #         tmdb_result = movies.search(title=name)
+            #         if len(tmdb_result) > 0:
+            #             for result in tmdb_result:
+            #                 guids = getattr(result, 'guids', [])
+            #                 # if any(f"imdb://{imdb_id}" in str(guid.id) for guid in guids):
+            #                 if any(f"tmdb://{tmdb_id}" in str(guid.id) for guid in guids):
+            #                     logger.info(f'Found {name} ({year}), will add to watchlist')
+            #
+            #                     movie = result
+            #                     missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+            #                     break
+            #                 else:
+            #                     if len(tmdb_result) == 1:  # getGuid makes only sense, when there is only one result
+            #                         # result = movies.getGuid(imdb_id)
+            #                         movie = movies.getGuid(f'tmdb://{tmdb_id}')
+            #                         logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
+            #         else:
+            #             # result = movies.getGuid(imdb_id)
+            #             movie = movies.getGuid(f'tmdb://{tmdb_id}')
+            #             logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
+            #
+            #             missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+            #     except NotFound:
+            #         logger.info(f'Movie {name} ({year}) is missing')
+            #         is_present = any(
+            #             combination.name == existing.name and combination.year == existing.year for existing in missing)
+            #         if not is_present:
+            #             logger.debug(f'Movie {name} ({year}) added to missing list')
+            #             missing.append(combination)
             if config.tmdb_use_api:
-                # imdb_id = tmdb.get_imdb_id(tmdb_id)
-
                 try:
                     # try to search the movie the normal way first. compare guid then to avoid using movies.getGuid
                     # because this function is really, really slow af
                     # search(): 8 - 12 movies/s <> getGuid(): 2 - 4 movies/s
                     tmdb_result = movies.search(title=name)
+                    matches = []
+
                     if len(tmdb_result) > 0:
                         for result in tmdb_result:
                             guids = getattr(result, 'guids', [])
-                            # if any(f"imdb://{imdb_id}" in str(guid.id) for guid in guids):
                             if any(f"tmdb://{tmdb_id}" in str(guid.id) for guid in guids):
-                                logger.info(f'Found {name} ({year}), will add to watchlist')
+                                matches.append(result)
 
-                                movie = result
+                        if len(matches) == 1:
+                            movie = matches[0]
+                            logger.info(f'Found {name} ({year}), will use this for rating update')
+                            missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+
+                        elif len(matches) > 1:
+                            movie = choose_movie(autoselector, combination, matches, logger,
+                                                 web_mode=config.web_mode)
+                            if movie:
+                                logger.info(f'User selected {movie.title} ({movie.year}) for rating update')
+                                was_missing_names.append(movie.title)
                                 missing = util.remove_from_missing_if_needed(missing, was_missing_names)
-                                break
                             else:
-                                if len(tmdb_result) == 1:  # getGuid makes only sense, when there is only one result
-                                    # result = movies.getGuid(imdb_id)
-                                    movie = movies.getGuid(f'tmdb://{tmdb_id}')
-                                    logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
-                    else:
-                        # result = movies.getGuid(imdb_id)
-                        movie = movies.getGuid(f'tmdb://{tmdb_id}')
-                        logger.info(f'Found {name} ({year}) via IMDB ID, will add to watchlist')
+                                logger.info(f'User skipped selection for {name} ({year})')
+                                raise NotFound  # treat as missing if skipped
 
-                        missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                        else:
+                            # No matching TMDb GUIDs found, fallback to getGuid
+                            logger.debug(f'No exact GUID match for {name} ({year}), trying TMDb GUID lookup...')
+                            movie = movies.getGuid(f'tmdb://{tmdb_id}')
+                            if movie:
+                                logger.info(f'Found {name} ({year}) via TMDb ID, will use for rating update')
+                                missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                            else:
+                                raise NotFound
+
+                    else:
+                        # No Plex results at all, fallback to getGuid
+                        movie = movies.getGuid(f'tmdb://{tmdb_id}')
+                        if movie:
+                            logger.info(f'Found {name} ({year}) via TMDb ID, will use for rating update')
+                            missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                        else:
+                            raise NotFound
+
                 except NotFound:
                     logger.info(f'Movie {name} ({year}) is missing')
                     is_present = any(
-                        combination.name == existing.name and combination.year == existing.year for existing in missing)
+                        combination.name == existing.name and combination.year == existing.year for existing in missing
+                    )
                     if not is_present:
                         logger.debug(f'Movie {name} ({year}) added to missing list')
                         missing.append(combination)
+
             else:  # old way
                 years = [year, str(int(year) - 1), str(int(year) + 1)]
                 result = movies.search(title=name, year=years)
@@ -210,6 +270,7 @@ def rating(plex, movies, logger: logging.Logger):
         MissingMovie.store_json(missing)
         autoselection.AutoSelection.store_json(autoselector)
         logger.info('All ratings imported.')
+        progress_callback(f'All ratings imported')
 
 
 def _read_ratings_csv_():

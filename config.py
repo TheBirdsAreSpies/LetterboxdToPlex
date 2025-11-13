@@ -48,6 +48,7 @@ ignore_path = "ignore.json"
 mapping_path = "mapping.json"
 autoselection_path = "autoselection.json"
 
+web_mode = False
 
 if os.path.exists(config_path):
     try:

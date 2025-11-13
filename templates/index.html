@@ -32,6 +32,11 @@
         </div>
     </div>
 
+    <h2>Pending Autoselections</h2>
+    <div id="autoselectionContainer">
+        <p id="noPending">No pending autoselections</p>
+    </div>
+
     <h2>Missing Movies</h2>
     {% if missing %}
     <table id="missingTable">
@@ -154,6 +159,89 @@
         table.setAttribute("data-sort-col", colIndex);
         table.setAttribute("data-sort-dir", asc ? "asc" : "desc");
     }
+
+   document.addEventListener('DOMContentLoaded', () => {
+        const autoselectionContainer = document.getElementById('autoselectionContainer');
+
+        async function loadAutoselections() {
+            const res = await fetch('/autoselections');
+            const data = await res.json();
+
+            autoselectionContainer.innerHTML = '';
+
+            if (!data.length) {
+                const p = document.createElement('p');
+                p.innerText = 'No pending autoselections';
+                autoselectionContainer.appendChild(p);
+                return;
+            }
+
+            data.forEach(sel => {
+                const row = document.createElement('div');
+                row.style.display = 'inline-flex';
+                row.style.alignItems = 'center';
+                row.style.padding = '0.5rem';
+                row.style.border = '1px solid #ccc';
+                row.style.marginBottom = '0.5rem';
+                row.style.background = '#fff';
+
+                // Title
+                const title = document.createElement('div');
+                title.innerHTML = `<strong>${sel.combination.name} (${sel.combination.year})</strong>`;
+                title.style.marginRight = '0.5rem'; // small spacing
+                row.appendChild(title);
+
+                // Buttons container
+                const buttonsContainer = document.createElement('div');
+                buttonsContainer.style.display = 'inline-flex';
+                buttonsContainer.style.gap = '0.3rem'; // small gap between buttons
+                row.appendChild(buttonsContainer);
+
+                // Movie options buttons
+                sel.options.forEach(opt => {
+                    const btn = document.createElement('button');
+                    btn.innerText = `${opt.title} (${opt.year})` + (opt.edition ? ` - ${opt.edition}` : '');
+                    btn.onclick = async () => {
+                        await fetch('/autoselections/choose', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                name: sel.combination.name,
+                                year: sel.combination.year,
+                                selected_key: opt.key
+                            })
+                        });
+                        loadAutoselections(); // refresh list
+                    };
+                    buttonsContainer.appendChild(btn);
+                });
+
+                // Skip button
+                const skipBtn = document.createElement('button');
+                skipBtn.innerText = 'Skip';
+                skipBtn.style.background = '#d33';
+                skipBtn.style.color = 'white';
+                skipBtn.onclick = async () => {
+                    await fetch('/autoselections/skip', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name: sel.combination.name,
+                            year: sel.combination.year
+                        })
+                    });
+                    loadAutoselections(); // refresh list
+                };
+                buttonsContainer.appendChild(skipBtn);
+
+                row.appendChild(buttonsContainer);
+                autoselectionContainer.appendChild(row);
+            });
+        }
+
+        setInterval(loadAutoselections, 5000);
+        loadAutoselections();
+    });
     </script>
 </body>
 </html>
