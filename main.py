@@ -194,6 +194,12 @@ def config_save():
 
         connected = False
         try:
+            if config.tmdb_use_api:
+                tmdb.create_table()
+                tmdb.reorganize_indexes()
+                tmdb.invalidate_cache()
+                letterboxd.create_table()
+
             plex = PlexServer(config.baseurl, config.token)
             movies = plex.library.section('Movies')
             connected = True
@@ -325,18 +331,18 @@ def main():
     except Exception:
         logger.error("Not able to connect to Plex")
 
-    if args.web:
-        config.web_mode = True
-
-        print("Starting server http://localhost:5000 ...")
-        app.run(debug=False, port=5000)
-        return
-
     if config.tmdb_use_api:
         tmdb.create_table()
         tmdb.reorganize_indexes()
         tmdb.invalidate_cache()
         letterboxd.create_table()
+
+    if args.web:
+        config.web_mode = True
+
+        print("Starting server http://localhost:5000 ...")
+        app.run(host="0.0.0.0", port=5000, debug=False)
+        return
 
     if not args.web:
         if args.watchlist or (args.owned is None and not args.rating):
