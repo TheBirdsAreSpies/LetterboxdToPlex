@@ -25,7 +25,7 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
 
     data = _read_ratings_csv_()
 
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
 
     create_table_query = '''

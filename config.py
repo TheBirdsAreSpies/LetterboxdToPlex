@@ -3,8 +3,6 @@ import os
 import tmdb
 from enum import Enum
 
-config_path = "config.json"
-
 # plex settings
 baseurl = "http://127.0.0.1:32400"
 token = "YOUR_PLEX_TOKEN"
@@ -43,10 +41,12 @@ watched_path = "watched.csv"
 ratings_path = "ratings.csv"
 
 # files to create
-missing_path = "missing.json"
-ignore_path = "ignore.json"
-mapping_path = "mapping.json"
-autoselection_path = "autoselection.json"
+config_path = "config/config.json"
+missing_path = "data/missing.json"
+ignore_path = "data/ignore.json"
+mapping_path = "data/mapping.json"
+autoselection_path = "data/autoselection.json"
+db_path = "data/ltp.db"
 
 web_mode = False
 

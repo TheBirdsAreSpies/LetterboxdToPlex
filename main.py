@@ -325,6 +325,9 @@ def main():
     logger = logging.getLogger('')
     logger.setLevel(level=logging.INFO)
 
+    if not os.path.exists("data"): os.mkdir("data")
+    if not os.path.exists("config"): os.mkdir("config")
+
     try:
         plex = PlexServer(config.baseurl, config.token)
         movies = plex.library.section('Movies')

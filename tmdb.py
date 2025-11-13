@@ -129,7 +129,7 @@ def __get_headers():
 def drop_table():
     create_table_query = 'DROP TABLE tmdb_cache'
 
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
     cursor.execute(create_table_query)
     connection.commit()
@@ -150,7 +150,7 @@ def create_table():
     )
     '''
 
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
     cursor.execute(create_table_query)
 
@@ -172,7 +172,7 @@ def create_table():
 
 
 def reorganize_indexes():
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
     cursor.execute('DROP INDEX IF EXISTS idx_tmdb_id;')
     cursor.execute('CREATE INDEX idx_tmdb_id ON tmdb_cache (tmdb_id);')
@@ -193,7 +193,7 @@ def __get_cached(title: str, year: int, lb: bool):
     else:
         select_query = 'SELECT * FROM tmdb_cache WHERE tmdb_translated_title = ? AND tmdb_release_date = ?'
 
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
     cursor.execute(select_query, (title, year))
 
@@ -216,7 +216,7 @@ def __get_cached(title: str, year: int, lb: bool):
 def get_imdb_id(movie_id: str):
     select_query = 'SELECT imdb_id FROM tmdb_cache WHERE tmdb_id = ?'
 
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
     cursor.execute(select_query, (movie_id,))
 
@@ -232,7 +232,7 @@ def get_imdb_id(movie_id: str):
 
 def store_movie_to_cache(tmdb_translated_title: str, tmdb_release_date: str,
                          lb_title: str, lb_date: str, tmdb_id: str = None):
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
 
     select_query = 'SELECT * FROM tmdb_cache WHERE lb_title = ? AND lb_year = ?'
@@ -258,7 +258,7 @@ def invalidate_cache():
     if not config.tmdb_invalidate_cache:
         return
 
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
 
     cursor.execute(f"""

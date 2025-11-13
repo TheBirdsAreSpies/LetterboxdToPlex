@@ -1,5 +1,6 @@
 import requests
 import sqlite3
+import config
 
 from letterboxdpy.movie import Movie
 
@@ -10,7 +11,7 @@ def __letterboxd_movie_from_slug(slug):
 
 
 def ids_from_slug(slug):
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
 
     select_query = 'SELECT * FROM letterboxd_cache WHERE slug = ?'
@@ -37,7 +38,7 @@ def ids_from_slug(slug):
 
 
 def slug_from_short_url(uri):
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
 
     select_query = 'SELECT * FROM letterboxd_cache WHERE short_url = ?'
@@ -73,7 +74,7 @@ def create_table():
     )
     '''
 
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
     cursor.execute(create_table_query)
     connection.commit()
@@ -81,7 +82,7 @@ def create_table():
 
 
 def short_to_long_url(short_url: str) -> str:
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
 
     select_query = 'SELECT * FROM letterboxd_cache WHERE short_url = ?'
@@ -93,7 +94,7 @@ def short_to_long_url(short_url: str) -> str:
 
 
 def store_to_cache(slug: str, short_url: str, long_url: str, tmdb_id: str = None):
-    connection = sqlite3.connect('ltp.db')
+    connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
 
     select_query = 'SELECT * FROM letterboxd_cache WHERE slug = ?'
@@ -111,7 +112,7 @@ def store_to_cache(slug: str, short_url: str, long_url: str, tmdb_id: str = None
 
 def set_tmdb_id(slug: str, tmdb_id: str, imdb_id: str):
     try:
-        connection = sqlite3.connect('ltp.db')
+        connection = sqlite3.connect(config.db_path)
         cursor = connection.cursor()
 
         update_query = 'UPDATE letterboxd_cache SET tmdb_id = ?, imdb_id = ? WHERE slug = ?'
