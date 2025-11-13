@@ -182,13 +182,40 @@ def config_data():
 
 @app.route("/config/save", methods=["POST"])
 def config_save():
+    global plex, movies
     try:
         cfg = request.get_json()
+
         with open(config.config_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=4)
-        return jsonify({"success": True})
+
+        for key, value in cfg.items():
+            setattr(config, key, value)
+
+        connected = False
+        try:
+            plex = PlexServer(config.baseurl, config.token)
+            movies = plex.library.section('Movies')
+            connected = True
+        except Exception as e:
+            plex = None
+            movies = None
+            return jsonify({
+                "success": True,
+                "plex_connected": False,
+                "message": f"Config saved, but failed to connect to Plex: {str(e)}"
+            })
+
+        return jsonify({
+            "success": True,
+            "plex_connected": connected,
+            "message": "Config saved and connected to Plex successfully"
+        })
     except Exception as e:
-        return jsonify({"success": False, "message": str(e)})
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        })
 
 @app.route("/autoselections")
 def get_autoselections():
