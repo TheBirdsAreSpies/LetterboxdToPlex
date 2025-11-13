@@ -6,7 +6,7 @@ import queue
 import threading
 import time
 
-from flask import Flask, jsonify, request, send_file, Response, render_template
+from flask import Flask, jsonify, request, Response, render_template
 from enum import Enum
 
 import config
@@ -17,7 +17,6 @@ import tmdb
 import watchlist
 import zipfile
 import selector
-import autoselection
 
 from session import Session
 from plexapi.myplex import PlexServer
@@ -293,8 +292,11 @@ def main():
     logger = logging.getLogger('')
     logger.setLevel(level=logging.INFO)
 
-    plex = PlexServer(config.baseurl, config.token)
-    movies = plex.library.section('Movies')
+    try:
+        plex = PlexServer(config.baseurl, config.token)
+        movies = plex.library.section('Movies')
+    except Exception:
+        logger.error("Not able to connect to Plex")
 
     if args.web:
         config.web_mode = True
