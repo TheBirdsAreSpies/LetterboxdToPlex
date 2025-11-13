@@ -72,9 +72,13 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
                 if len(tmdb_movies) == 0:
                     logger.info('Searched TMDB, was not able to find.')
                     tmdb_movies = tmdb.search_movie(title=name)
+                    if len(tmdb_movies) == 0:
+                        logger.debug(f'Movie {combination.name} ({combination.year}) not found on TMDB, added to missing list')
+                        combination.release_date = tmdb.release_date(tmdb_id)
+                        missing.append(combination)
+                        continue
 
                 tmdb_movie = tmdb_movies[0]
-
                 logger.info(f'Searched TMDB {name} ({year})')
                 org_title = name
                 org_year = year
