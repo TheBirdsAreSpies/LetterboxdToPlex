@@ -314,10 +314,16 @@ def release_date(movie_id: str):
 
     data = json.loads(response.text)
     movie_release_info = MovieReleaseInfo(data)
-    filtered_release = [rd for country in movie_release_info.results
-                        if country.iso_3166_1 == config.tmdb_release_country_code
-                        for rd in country.release_dates
-                        if rd.type == config.tmdb_release_type.value]
+
+    release_type_value = getattr(config.tmdb_release_type, "value", config.tmdb_release_type)
+
+    filtered_release = [
+        rd
+        for country in movie_release_info.results
+        if country.iso_3166_1 == config.tmdb_release_country_code
+        for rd in country.release_dates
+        if str(rd.type) == str(release_type_value)
+    ]
 
     if len(filtered_release) > 0:
         return str(filtered_release[0].release_date)
