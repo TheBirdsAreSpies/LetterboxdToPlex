@@ -1,0 +1,19 @@
+version: "3.9"
+
+services:
+  letterboxd-to-plex:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: letterboxd-to-plex
+    restart: unless-stopped
+    ports:
+      - "5019:5000"
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    command: ["python", "main.py", "--web"]
