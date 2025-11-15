@@ -30,13 +30,13 @@ def choose_movie(autoselector, combination, results, logger, web_mode=False):
         ev = threading.Event()
         selection_events[combination.name] = ev
         ev.wait()  # block until user picks
-        chosen_key = selection_results.pop(combination.name)
+        chosen_key = selection_results.pop(combination.name, None)
 
         if not chosen_key:  # most likely pressed "Skip" button
             return None
 
-        selection_requests.pop(combination.name)
-        selection_events.pop(combination.name)
+        selection_requests.pop(combination.name, None)
+        selection_events.pop(combination.name, None)
 
         chosen_movie = next((m for m in results if m.key == chosen_key), None)
         if chosen_movie:
