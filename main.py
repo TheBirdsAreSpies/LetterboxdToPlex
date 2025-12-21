@@ -9,10 +9,12 @@ import time
 from flask import Flask, jsonify, request, Response, render_template
 from enum import Enum
 
+import csv
 import config
 import letterboxd
 import owned
 import rating
+import re
 import tmdb
 import watchlist
 import zipfile
@@ -98,12 +100,29 @@ def ignore():
     save_json(config.ignore_path, ignore_list)
     return jsonify(success=True)
 
+def load_csv_names(path):
+    names = set()
+    with open(path, newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            name = row.get("Name", "").strip().lower()
+            if name:
+                names.add(name)
+    return names
+
+
 @app.route("/action/<name>", methods=["POST"])
 def action(name):
     logger = logging.getLogger('')
     logger.setLevel(logging.INFO)
 
-    if name not in ["watchlist", "owned", "rating"]:
+    if name not in [
+        "watchlist",
+        "owned",
+        "rating",
+        "cleanup_missing",
+        "strip_missing_years"
+    ]:
         return jsonify(success=False, message=f"Unknown action '{name}'")
 
     if name in ["watchlist", "rating"]:
@@ -136,6 +155,49 @@ def action(name):
             csv_data,
             mimetype="text/csv",
             headers={"Content-Disposition": "attachment; filename=owned.csv"}
+        )
+
+    elif name == "cleanup_missing":
+        with open(config.missing_path, "r", encoding="utf-8") as f:
+            missing = json.load(f)
+
+        known_names = set()
+        known_names |= load_csv_names(config.watchlist_path)
+        known_names |= load_csv_names(config.watched_path)
+        known_names |= load_csv_names(config.ratings_path)
+
+        original_count = len(missing)
+
+        cleaned = [
+            m for m in missing
+            if m.get("name", "").strip().lower() in known_names
+        ]
+
+        with open(config.missing_path, "w", encoding="utf-8") as f:
+            json.dump(cleaned, f, indent=2)
+
+        return jsonify(
+            success=True,
+            message=f"Removed {original_count - len(cleaned)} entries from missing list"
+        )
+
+    elif name == "strip_missing_years":
+        with open(config.missing_path, "r", encoding="utf-8") as f:
+            missing = json.load(f)
+
+        changed = 0
+
+        for m in missing:
+            if m["release_date"] is not None:
+                m["release_date"] = None
+                changed += 1
+
+        with open(config.missing_path, "w", encoding="utf-8") as f:
+            json.dump(missing, f, indent=2)
+
+        return jsonify(
+            success=True,
+            message=f"Cleaned years from {changed} missing entries"
         )
 
 @app.route("/stream/watchlist")
