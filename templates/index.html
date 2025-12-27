@@ -171,7 +171,9 @@
 
             if (colIndex === 2) {
                 const parseDate = (txt) => {
-                    if (!txt || txt === '-' || txt.toLowerCase() === 'n/a') return null;
+                    if (!txt) return null;
+                    const t = txt.trim().toLowerCase();
+                    if (t === '-' || t === 'n/a' || t === '') return null;
                     const d = Date.parse(txt);
                     return isNaN(d) ? null : d;
                 };
@@ -180,8 +182,8 @@
                 const bDate = parseDate(bText);
 
                 if (aDate === null && bDate === null) return 0;
-                if (aDate === null) return asc ? 1 : -1; // push nulls to bottom when ascending
-                if (bDate === null) return asc ? -1 : 1;
+                if (aDate === null) return 1;
+                if (bDate === null) return -1;
 
                 return asc ? aDate - bDate : bDate - aDate;
             }
