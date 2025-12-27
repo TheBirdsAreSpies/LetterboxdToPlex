@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>LetterboxdToPlex Web</title>
     <style>
         body { font-family: sans-serif; margin: 2rem; background: #fafafa; }
@@ -14,6 +15,24 @@
         .danger:hover { background: #a00; }
         .action-bar { margin-bottom: 1.5rem; }
         #status { padding: 0.8rem; background: #eef; border-radius: 5px; margin-bottom: 1rem; display:none; }
+
+        .action-bar > div { display:flex; gap:0.5rem; align-items:center; }
+        .action-bar button { white-space:nowrap; }
+        .autoselection-row { display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem; padding:0.5rem; border:1px solid #ccc; margin-bottom:0.5rem; background:#fff; }
+        .autoselection-row .title { margin-right:0.5rem; font-weight:600; }
+
+        .table-wrap { width:100%; overflow-x:auto; }
+
+        @media (max-width: 600px) {
+            body { margin: 0.6rem; }
+            button { padding: 0.35rem 0.5rem; font-size: 14px; }
+            .action-bar { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+            .action-bar > div { flex-wrap:wrap; }
+            th, td { padding: 0.4rem; font-size: 14px; }
+            #status { max-height: 220px; font-size: 13px; }
+            .autoselection-row { flex-direction:column; align-items:flex-start; }
+            .autoselection-row .title { margin-bottom:0.25rem; }
+        }
     </style>
 </head>
 <body>
@@ -41,6 +60,7 @@
 
     <h2>Missing Movies</h2>
     {% if missing %}
+    <div class="table-wrap">
     <table id="missingTable">
         <tr>
             <th onclick="sortTable(0)">Title ▲▼</th>
@@ -63,6 +83,7 @@
         </tr>
         {% endfor %}
     </table>
+    </div>
     {% else %}
     <p>No missing movies</p>
     {% endif %}
@@ -148,6 +169,23 @@
             let aText = a.cells[colIndex].innerText.trim();
             let bText = b.cells[colIndex].innerText.trim();
 
+            if (colIndex === 2) {
+                const parseDate = (txt) => {
+                    if (!txt || txt === '-' || txt.toLowerCase() === 'n/a') return null;
+                    const d = Date.parse(txt);
+                    return isNaN(d) ? null : d;
+                };
+
+                const aDate = parseDate(aText);
+                const bDate = parseDate(bText);
+
+                if (aDate === null && bDate === null) return 0;
+                if (aDate === null) return asc ? 1 : -1; // push nulls to bottom when ascending
+                if (bDate === null) return asc ? -1 : 1;
+
+                return asc ? aDate - bDate : bDate - aDate;
+            }
+
             let aNum = parseFloat(aText), bNum = parseFloat(bText);
             if (!isNaN(aNum) && !isNaN(bNum)) {
                 return asc ? aNum - bNum : bNum - aNum;
@@ -180,23 +218,19 @@
 
             data.forEach(sel => {
                 const row = document.createElement('div');
-                row.style.display = 'inline-flex';
-                row.style.alignItems = 'center';
-                row.style.padding = '0.5rem';
-                row.style.border = '1px solid #ccc';
-                row.style.marginBottom = '0.5rem';
-                row.style.background = '#fff';
+                row.className = 'autoselection-row';
 
                 // Title
                 const title = document.createElement('div');
-                title.innerHTML = `<strong>${sel.combination.name} (${sel.combination.year})</strong>`;
-                title.style.marginRight = '0.5rem'; // small spacing
+                title.className = 'title';
+                title.innerHTML = `${sel.combination.name} (${sel.combination.year})`;
                 row.appendChild(title);
 
                 // Buttons container
                 const buttonsContainer = document.createElement('div');
                 buttonsContainer.style.display = 'inline-flex';
                 buttonsContainer.style.gap = '0.3rem'; // small gap between buttons
+                buttonsContainer.style.flexWrap = 'wrap';
                 row.appendChild(buttonsContainer);
 
                 // Movie options buttons
@@ -221,8 +255,7 @@
                 // Skip button
                 const skipBtn = document.createElement('button');
                 skipBtn.innerText = 'Skip';
-                skipBtn.style.background = '#d33';
-                skipBtn.style.color = 'white';
+                skipBtn.className = 'danger';
                 skipBtn.onclick = async () => {
                     await fetch('/autoselections/skip', {
                         method: 'POST',
