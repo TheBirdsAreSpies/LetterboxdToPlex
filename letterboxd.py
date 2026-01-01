@@ -21,20 +21,23 @@ def ids_from_slug(slug):
     if rs and rs[4] is not None:
         return [rs[4], rs[5]]
     else:
-        lb_movie = __letterboxd_movie_from_slug(slug)
-        tmdb_url = lb_movie.tmdb_link
-        parts = tmdb_url.split("/")
-        tmdb_id = parts[len(parts) - 2]
+        try:
+            lb_movie = __letterboxd_movie_from_slug(slug)
+            tmdb_url = lb_movie.tmdb_link
+            parts = tmdb_url.split("/")
+            tmdb_id = parts[len(parts) - 2]
 
-        imdb_url = lb_movie.imdb_link
-        if imdb_url is not None:
-            parts = imdb_url.split("/")
-            imdb_id = parts[len(parts) - 2]
-        else:
-            imdb_id = None
+            imdb_url = lb_movie.imdb_link
+            if imdb_url is not None:
+                parts = imdb_url.split("/")
+                imdb_id = parts[len(parts) - 2]
+            else:
+                imdb_id = None
 
-        set_tmdb_id(slug, tmdb_id, imdb_id)
-        return [tmdb_id, imdb_id]
+            set_tmdb_id(slug, tmdb_id, imdb_id)
+            return [tmdb_id, imdb_id]
+        except Exception:
+            return [-1, -1]
 
 
 def slug_from_short_url(uri):
