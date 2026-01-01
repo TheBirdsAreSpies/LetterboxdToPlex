@@ -42,6 +42,9 @@ def save_json(path, data):
         json.dump(data, f, indent=3, ensure_ascii=False)
 
 def lb_export():
+    if not config.use_api:
+        return
+
     zipfile_name = 'letterboxd_export.zip'
     skip_download = False
 
