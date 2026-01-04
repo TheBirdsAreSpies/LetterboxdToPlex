@@ -9,6 +9,8 @@
         table { border-collapse: collapse; width: 100%; box-shadow: 0 0 6px rgba(0,0,0,0.1); background: white; }
         table.two-tone tbody tr:nth-child(odd) td { background: #ffffff; }
         table.two-tone tbody tr:nth-child(even) td { background: #f6f8fa; }
+        table.two-tone tbody tr.alt td { background: #f6f8fa; }
+        table.two-tone tbody tr:not(.alt) td { background: #ffffff; }
         table.two-tone tbody tr:hover td { background: #e8f4ff; }
         th, td { border: 1px solid #ddd; padding: 0.6rem; text-align: left; }
         th { background: #eee; }
@@ -199,13 +201,33 @@
             return asc ? aText.localeCompare(bText) : bText.localeCompare(aText);
         });
 
-        rows.forEach(row => table.appendChild(row));
+        const target = table.tBodies && table.tBodies[0] ? table.tBodies[0] : table;
+        rows.forEach(row => target.appendChild(row));
 
         table.setAttribute("data-sort-col", colIndex);
         table.setAttribute("data-sort-dir", asc ? "asc" : "desc");
+
+        // Update explicit zebra striping classes so the two-tone stays consistent
+        updateRowStriping(table);
     }
 
-   document.addEventListener('DOMContentLoaded', () => {
+    // Apply or refresh alternating row classes (.alt) for zebra striping.
+    function updateRowStriping(table) {
+        const tbody = table.tBodies && table.tBodies[0];
+        let rows = [];
+        if (tbody) {
+            rows = Array.from(tbody.rows);
+        } else {
+            // Fallback: use table.rows but skip the header row
+            rows = Array.from(table.rows).slice(1);
+        }
+
+        rows.forEach((tr, i) => {
+            if ((i % 2) === 1) tr.classList.add('alt'); else tr.classList.remove('alt');
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
         const autoselectionContainer = document.getElementById('autoselectionContainer');
 
         async function loadAutoselections() {
@@ -281,7 +303,22 @@
 
         setInterval(loadAutoselections, 5000);
         loadAutoselections();
-    });
+
+        // Ensure zebra striping is applied on initial page load
+        const missingTable = document.getElementById('missingTable');
+        if (missingTable) {
+            // Make sure there's a tbody element for consistent DOM updates
+            if (!missingTable.tBodies || missingTable.tBodies.length === 0) {
+                const newTbody = document.createElement('tbody');
+                // move existing data rows (skip the header at rows[0]) into tbody
+                const dataRows = Array.from(missingTable.rows).slice(1);
+                dataRows.forEach(r => newTbody.appendChild(r));
+                missingTable.appendChild(newTbody);
+            }
+            updateRowStriping(missingTable);
+        }
+     });
+
     </script>
 </body>
 </html>
