@@ -14,7 +14,6 @@ import config
 import letterboxd
 import owned
 import rating
-import re
 import tmdb
 import watchlist
 import zipfile
@@ -103,15 +102,37 @@ def ignore():
     save_json(config.ignore_path, ignore_list)
     return jsonify(success=True)
 
-def load_csv_names(path):
-    names = set()
+def load_csv_name_year(path):
+    combos = set()
+    if not os.path.exists(path):
+        return combos
     with open(path, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
             name = row.get("Name", "").strip().lower()
+            year_raw = (row.get("Year") or row.get("Release Year") or "").strip()
+            year = None
+            if year_raw:
+                try:
+                    year = int(year_raw[:4])
+                except Exception:
+                    year = None
             if name:
-                names.add(name)
-    return names
+                combos.add((name, year))
+    return combos
+
+
+def _extract_year_from_release_date(val):
+    if val is None:
+        return None
+    if isinstance(val, int):
+        return val
+    if isinstance(val, str) and val:
+        try:
+            return int(val[:4])
+        except Exception:
+            return None
+    return None
 
 
 @app.route("/action/<name>", methods=["POST"])
@@ -164,17 +185,26 @@ def action(name):
         with open(config.missing_path, "r", encoding="utf-8") as f:
             missing = json.load(f)
 
-        known_names = set()
-        known_names |= load_csv_names(config.watchlist_path)
-        known_names |= load_csv_names(config.watched_path)
-        known_names |= load_csv_names(config.ratings_path)
+        known_combinations = set()
+        known_combinations |= load_csv_name_year(config.watchlist_path)
+        known_combinations |= load_csv_name_year(config.watched_path)
+        known_combinations |= load_csv_name_year(config.ratings_path)
 
         original_count = len(missing)
 
-        cleaned = [
-            m for m in missing
-            if m.get("name", "").strip().lower() in known_names
-        ]
+        cleaned = []
+        for m in missing:
+            name = m.get("name", "").strip().lower()
+            year = _extract_year_from_release_date(m.get("release_date"))
+            # also accept a direct 'year' field if present
+            if year is None and "year" in m:
+                try:
+                    year = int(str(m.get("year")).strip()[:4])
+                except Exception:
+                    year = None
+
+            if (name, year) in known_combinations:
+                cleaned.append(m)
 
         with open(config.missing_path, "w", encoding="utf-8") as f:
             json.dump(cleaned, f, indent=2)
