@@ -7,6 +7,9 @@
     <style>
         body { font-family: sans-serif; margin: 2rem; background: #fafafa; }
         table { border-collapse: collapse; width: 100%; box-shadow: 0 0 6px rgba(0,0,0,0.1); background: white; }
+        table.two-tone tbody tr:nth-child(odd) td { background: #ffffff; }
+        table.two-tone tbody tr:nth-child(even) td { background: #f6f8fa; }
+        table.two-tone tbody tr:hover td { background: #e8f4ff; }
         th, td { border: 1px solid #ddd; padding: 0.6rem; text-align: left; }
         th { background: #eee; }
         button { padding: 0.4rem 0.8rem; cursor: pointer; background: #444; color: white; border: none; border-radius: 4px; }
@@ -61,7 +64,7 @@
     <h2>Missing Movies</h2>
     {% if missing %}
     <div class="table-wrap">
-    <table id="missingTable">
+    <table id="missingTable" class="two-tone">
         <tr>
             <th onclick="sortTable(0)">Title ▲▼</th>
             <th onclick="sortTable(1)">Year ▲▼</th>
