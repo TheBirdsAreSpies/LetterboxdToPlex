@@ -1,6 +1,6 @@
 import requests
 import re
-import json
+import cloudscraper
 
 
 class Session:
@@ -10,6 +10,7 @@ class Session:
     _csrf = None
     _cookies = None
     _is_logged_in = False
+    _scraper = None
 
     def __init__(self, username: str, password: str, use_2fa_code):
         if username is None or password is None:
@@ -18,32 +19,75 @@ class Session:
         self.sign_in(username, password, use_2fa_code)
 
     def sign_in(self, username, password, use_2fa_code):
-        session = requests.Session()
+        scraper = cloudscraper.create_scraper(
+            browser={
+                "platform": "windows",
+                "browser": "chrome",
+                "mobile": False
+            }
+        )
 
-        # Simulate initial GET request to obtain CSRF token and cookies from the main page
-        initial_response = session.get(self.MAIN_PAGE_URL)
-        if initial_response.status_code != 200:
-            raise Exception(f"Failed to load main page: {initial_response.status_code}")
-        self._csrf = session.cookies['com.xk72.webparts.csrf']
+        # Initial GET to solve Cloudflare challenge and collect cookies/CSRF
+        r = scraper.get(self.MAIN_PAGE_URL, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer": self.MAIN_PAGE_URL
+        }, timeout=30)
+
+        if r.status_code != 200:
+            raise Exception(f"Failed to load main page: {r.status_code}")
+
+        # Try cookie first, then fallback to parsing HTML for __csrf
+        csrf = scraper.cookies.get("com.xk72.webparts.csrf")
+        if not csrf:
+            m = re.search(r'name="__csrf"\s+value="([^"]+)"', r.text)
+            if m:
+                csrf = m.group(1)
+
+        if not csrf:
+            raise Exception("CSRF token not found after initial GET")
 
         auth_code = ""
         if use_2fa_code:
             auth_code = input("Enter 2FA code: ")
 
         data = {
-            "__csrf": self._csrf,
+            "__csrf": csrf,
             "authenticationCode": auth_code,
             "username": username,
-            "password": password
+            "password": password,
+            "remember": "true"
         }
 
-        response = session.post(self.LOGIN_URL, data=data)
-        if response.status_code == 200:
-            response_data = json.loads(response.text)
-            self._is_logged_in = response_data.get('result') == 'success'
-            self._cookies = session.cookies
-        else:
-            raise Exception(f"Was not able to create a session: {response.status_code}")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://letterboxd.com",
+            "Referer": "https://letterboxd.com/",
+        }
+
+        resp = scraper.post(self.LOGIN_URL, data=data, headers=headers, timeout=30)
+
+        # Detect Cloudflare page or other blocks
+        body_snippet = resp.text[:800] if resp.text else ""
+        if resp.status_code == 403 or "Just a moment" in body_snippet or "<title>Just a moment" in body_snippet:
+            raise Exception(f"Forbidden / Cloudflare challenge detected (403). Response snippet: {body_snippet}")
+
+        if resp.status_code != 200:
+            raise Exception(f"Login failed: {resp.status_code} - {body_snippet[:300]}")
+
+        try:
+            response_data = resp.json()
+        except Exception:
+            raise Exception(f"Unexpected non-json response on login. Snippet: {body_snippet[:800]}")
+
+        self._is_logged_in = response_data.get("result") == "success"
+        self._cookies = scraper.cookies
+        self._scraper = scraper
+        self._csrf = csrf
+        return self._is_logged_in
 
     def _build_headers(self):
         # we have to build a cookies string because setting the param per request does not work somehow
@@ -65,25 +109,36 @@ class Session:
 
         return headers
 
+
     def download_export_data(self, file_name='letterboxd_export.zip'):
         url = 'https://letterboxd.com/data/export/'
 
-        if not self._is_logged_in:
+        if not self._is_logged_in or not self._scraper:
             raise Exception('You have to log in to download your export data.')
 
         try:
             headers = self._build_headers()
-            response = requests.get(url, headers=headers)
+            response = self._scraper.get(url, headers=headers, stream=True, timeout=60)
 
-            if response.status_code == 200:
-                data = response.content
-                if 'html' in str(data):
-                    raise Exception('User not signed in')
+            body_snippet = ""
+            content_type = response.headers.get("Content-Type", "")
+            if response.status_code == 403 or 'html' in content_type.lower():
+                try:
+                    body_snippet = response.text[:800]
+                except Exception:
+                    body_snippet = ""
+                if response.status_code == 403 or "Just a moment" in body_snippet or "<title>Just a moment" in body_snippet:
+                    raise Exception(f"Forbidden / Cloudflare challenge detected (403). Response snippet: {body_snippet}")
 
-                with open(file_name, 'wb') as file:
-                    file.write(data)
-            else:
-                print("Error while downloading data")
+            if response.status_code != 200:
+                raise Exception(f"Download failed: {response.status_code}")
+
+            with open(file_name, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            return file_name
 
         except requests.exceptions.RequestException as e:
-            print(f"Unable to get web request: {e}")
+            raise Exception(f"Unable to get web request: {e}")
