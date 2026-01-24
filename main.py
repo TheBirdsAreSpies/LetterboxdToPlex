@@ -248,6 +248,26 @@ def stream_watchlist():
 
     return Response(generate(), mimetype='text/event-stream')
 
+@app.route("/task/status")
+def task_status():
+    running_tasks = []
+    for task_name, q in progress_queues.items():
+        if q is not None:
+            running_tasks.append(task_name)
+
+    if running_tasks:
+        return jsonify({
+            "running": True,
+            "task_name": running_tasks[0] if running_tasks else None,
+            "tasks": running_tasks
+        })
+    else:
+        return jsonify({
+            "running": False,
+            "task_name": None,
+            "tasks": []
+        })
+
 @app.route("/config", methods=["GET"])
 def config_page():
     # return HTML page
