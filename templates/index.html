@@ -317,6 +317,48 @@
             }
             updateRowStriping(missingTable);
         }
+
+        // Check if a watchlist task is running on page load and reconnect to stream
+        async function checkRunningTask() {
+            try {
+                const res = await fetch('/task/status');
+                const data = await res.json();
+
+                if (data.running && data.task_name === 'watchlist') {
+                    const status = document.getElementById('status');
+                    status.style.display = 'block';
+                    status.style.background = '#eef';
+                    status.innerHTML = 'Reconnecting to running watchlist task...<br>';
+
+                    const eventSource = new EventSource('/stream/watchlist');
+                    let logLines = ['Reconnected to running task...'];
+                    const MAX_LINES = 50;
+
+                    eventSource.onmessage = function (event) {
+                        logLines.push(event.data);
+                        if (logLines.length > MAX_LINES) {
+                            logLines = logLines.slice(logLines.length - MAX_LINES);
+                        }
+                        status.innerHTML = logLines.join('<br>');
+                        status.scrollTop = status.scrollHeight;
+                    };
+
+                    eventSource.onerror = function () {
+                        eventSource.close();
+                        logLines.push("Stream ended or error occurred");
+                        if (logLines.length > MAX_LINES) {
+                            logLines = logLines.slice(logLines.length - MAX_LINES);
+                        }
+                        status.innerHTML = logLines.join('<br>');
+                        status.scrollTop = status.scrollHeight;
+                    };
+                }
+            } catch (err) {
+                console.error('Error checking task status:', err);
+            }
+        }
+
+        checkRunningTask();
      });
 
     </script>
