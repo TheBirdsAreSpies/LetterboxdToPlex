@@ -1,6 +1,6 @@
 import requests
 import re
-import cloudscraper
+from curl_cffi import requests as curl_requests
 
 
 class Session:
@@ -19,26 +19,19 @@ class Session:
         self.sign_in(username, password, use_2fa_code)
 
     def sign_in(self, username, password, use_2fa_code):
-        scraper = cloudscraper.create_scraper(
-            browser={
-                "platform": "windows",
-                "browser": "chrome",
-                "mobile": False
-            }
-        )
+        session = curl_requests.Session()
 
         # Initial GET to solve Cloudflare challenge and collect cookies/CSRF
-        r = scraper.get(self.MAIN_PAGE_URL, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Referer": self.MAIN_PAGE_URL
-        }, timeout=30)
+        r = session.get(
+            self.MAIN_PAGE_URL,
+            impersonate="chrome",
+            timeout=30
+        )
 
         if r.status_code != 200:
             raise Exception(f"Failed to load main page: {r.status_code}")
 
-        # Try cookie first, then fallback to parsing HTML for __csrf
-        csrf = scraper.cookies.get("com.xk72.webparts.csrf")
+        csrf = session.cookies.get("com.xk72.webparts.csrf")
         if not csrf:
             m = re.search(r'name="__csrf"\s+value="([^"]+)"', r.text)
             if m:
@@ -60,7 +53,6 @@ class Session:
         }
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             "X-Requested-With": "XMLHttpRequest",
@@ -68,9 +60,15 @@ class Session:
             "Referer": "https://letterboxd.com/",
         }
 
-        resp = scraper.post(self.LOGIN_URL, data=data, headers=headers, timeout=30)
+        resp = session.post(
+            self.LOGIN_URL,
+            data=data,
+            headers=headers,
+            impersonate="chrome",
+            timeout=30
+        )
 
-        # Detect Cloudflare page or other blocks
+        # Detect Cloudflare page
         body_snippet = resp.text[:800] if resp.text else ""
         if resp.status_code == 403 or "Just a moment" in body_snippet or "<title>Just a moment" in body_snippet:
             raise Exception(f"Forbidden / Cloudflare challenge detected (403). Response snippet: {body_snippet}")
@@ -84,16 +82,23 @@ class Session:
             raise Exception(f"Unexpected non-json response on login. Snippet: {body_snippet[:800]}")
 
         self._is_logged_in = response_data.get("result") == "success"
-        self._cookies = scraper.cookies
-        self._scraper = scraper
+        self._cookies = session.cookies
+        self._scraper = session
         self._csrf = csrf
         return self._is_logged_in
 
     def _build_headers(self):
-        # we have to build a cookies string because setting the param per request does not work somehow
-        cookies = f'com.xk72.webparts.csrf={self._csrf};'
-        for cookie in self._cookies:
-            cookies = cookies + f'{cookie.name}={cookie.value}; '
+        cookies_str = f'com.xk72.webparts.csrf={self._csrf};'
+
+        if hasattr(self._cookies, 'items'):
+            for name, value in self._cookies.items():
+                cookies_str += f'{name}={value}; '
+        else:
+            for cookie in self._cookies:
+                if hasattr(cookie, 'name'):
+                    cookies_str += f'{cookie.name}={cookie.value}; '
+                else:
+                    continue
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/118.0",
@@ -104,7 +109,7 @@ class Session:
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             "X-Requested-With": "XMLHttpRequest",
             "Origin": "https://letterboxd.com",
-            "Cookie": cookies
+            "Cookie": cookies_str
         }
 
         return headers
@@ -118,7 +123,13 @@ class Session:
 
         try:
             headers = self._build_headers()
-            response = self._scraper.get(url, headers=headers, stream=True, timeout=60)
+            response = self._scraper.get(
+                url,
+                headers=headers,
+                impersonate="chrome120",
+                stream=True,
+                timeout=60
+            )
 
             body_snippet = ""
             content_type = response.headers.get("Content-Type", "")

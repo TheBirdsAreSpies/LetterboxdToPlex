@@ -8,4 +8,4 @@ letterboxdpy
 git+https://github.com/nmcassa/letterboxdpy.git
 lxml
 flask
-cloudscraper
+curl_cffi
