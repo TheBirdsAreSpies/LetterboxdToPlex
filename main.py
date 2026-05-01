@@ -172,37 +172,17 @@ def ignore():
     save_json(config.ignore_path, ignore_list)
     return jsonify(success=True)
 
-def load_csv_name_year(path):
-    combos = set()
+def load_csv_names(path):
+    names = set()
     if not os.path.exists(path):
-        return combos
+        return names
     with open(path, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
             name = row.get("Name", "").strip().lower()
-            year_raw = (row.get("Year") or row.get("Release Year") or "").strip()
-            year = None
-            if year_raw:
-                try:
-                    year = int(year_raw[:4])
-                except Exception:
-                    year = None
             if name:
-                combos.add((name, year))
-    return combos
-
-
-def _extract_year_from_release_date(val):
-    if val is None:
-        return None
-    if isinstance(val, int):
-        return val
-    if isinstance(val, str) and val:
-        try:
-            return int(val[:4])
-        except Exception:
-            return None
-    return None
+                names.add(name)
+    return names
 
 
 def _empty_task_state(task_name):
@@ -388,25 +368,17 @@ def action(name):
         with open(config.missing_path, "r", encoding="utf-8") as f:
             missing = json.load(f)
 
-        known_combinations = set()
-        known_combinations |= load_csv_name_year(config.watchlist_path)
-        known_combinations |= load_csv_name_year(config.watched_path)
-        known_combinations |= load_csv_name_year(config.ratings_path)
+        known_names = set()
+        known_names |= load_csv_names(config.watchlist_path)
+        known_names |= load_csv_names(config.watched_path)
+        known_names |= load_csv_names(config.ratings_path)
 
         original_count = len(missing)
 
         cleaned = []
         for m in missing:
-            name = m.get("name", "").strip().lower()
-            year = _extract_year_from_release_date(m.get("release_date"))
-            # also accept a direct 'year' field if present
-            if year is None and "year" in m:
-                try:
-                    year = int(str(m.get("year")).strip()[:4])
-                except Exception:
-                    year = None
-
-            if (name, year) not in known_combinations:
+            missing_name = str(m.get("name", "")).strip().lower()
+            if missing_name not in known_names:
                 cleaned.append(m)
 
         with open(config.missing_path, "w", encoding="utf-8") as f:
