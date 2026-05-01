@@ -1,155 +1,265 @@
-import requests
 import re
+import time
+import random
+from typing import Optional
+
 from curl_cffi import requests as curl_requests
+
+
+class CloudflareChallengeError(Exception):
+    def __init__(self, message, retry_after_seconds=None):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 class Session:
     LOGIN_URL = "https://letterboxd.com/user/login.do"
     MAIN_PAGE_URL = "https://letterboxd.com/"
+    SIGN_IN_PAGE_URL = "https://letterboxd.com/sign-in/"
+    EXPORT_URL = "https://letterboxd.com/data/export/"
 
-    _csrf = None
-    _cookies = None
-    _is_logged_in = False
-    _scraper = None
+    LOGIN_TIMEOUT_SECONDS = 30
+    DOWNLOAD_TIMEOUT_SECONDS = 60
+    RESPONSE_SNIPPET_LENGTH = 800
+
+    LOGIN_IMPERSONATES = ("chrome", "chrome120", "edge101")
+    DOWNLOAD_IMPERSONATES = LOGIN_IMPERSONATES
+
+    MAX_LOGIN_ATTEMPTS = 4
+    MAX_DOWNLOAD_ATTEMPTS = 4
+    BASE_RETRY_SECONDS = 2
+    MAX_RETRY_SECONDS = 20
+
+    _CHALLENGE_MARKERS = (
+        "Just a moment",
+        "<title>Just a moment",
+    )
 
     def __init__(self, username: str, password: str, use_2fa_code):
-        if username is None or password is None:
+        if not username or not password:
             raise Exception("Username or password not set.")
+
+        self._csrf = None
+        self._is_logged_in = False
+        self._scraper = None
 
         self.sign_in(username, password, use_2fa_code)
 
-    def sign_in(self, username, password, use_2fa_code):
-        session = curl_requests.Session()
+    @staticmethod
+    def _response_snippet(response, max_length=RESPONSE_SNIPPET_LENGTH):
+        try:
+            return response.text[:max_length] if response.text else ""
+        except Exception:
+            return ""
 
-        # Initial GET to solve Cloudflare challenge and collect cookies/CSRF
-        r = session.get(
-            self.MAIN_PAGE_URL,
-            impersonate="chrome",
-            timeout=30
+    def _is_cloudflare_challenge(self, response, body_snippet: Optional[str] = None):
+        snippet = body_snippet if body_snippet is not None else self._response_snippet(response)
+        if response.status_code in (403, 429):
+            return True
+        return any(marker in snippet for marker in self._CHALLENGE_MARKERS)
+
+    def _raise_if_cloudflare_challenge(self, response):
+        body_snippet = self._response_snippet(response)
+        if self._is_cloudflare_challenge(response, body_snippet):
+            retry_after = response.headers.get("Retry-After") if hasattr(response, "headers") else None
+            retry_after_seconds = None
+            if retry_after:
+                try:
+                    retry_after_seconds = int(str(retry_after).strip())
+                except Exception:
+                    retry_after_seconds = None
+
+            cf_ray = response.headers.get("cf-ray") if hasattr(response, "headers") else None
+            status = getattr(response, "status_code", "?")
+            detail = f"Cloudflare challenge detected ({status})"
+            if cf_ray:
+                detail += f", cf-ray={cf_ray}"
+            detail += f". Response snippet: {body_snippet}"
+            raise CloudflareChallengeError(detail, retry_after_seconds=retry_after_seconds)
+
+    @classmethod
+    def _retry_delay_seconds(cls, attempt, retry_after_seconds=None):
+        if retry_after_seconds is not None and retry_after_seconds > 0:
+            return min(retry_after_seconds, cls.MAX_RETRY_SECONDS)
+
+        base = min(cls.BASE_RETRY_SECONDS * (2 ** (attempt - 1)), cls.MAX_RETRY_SECONDS)
+        jitter = random.uniform(0, 0.5)
+        return base + jitter
+
+    def _create_session(self):
+        session = curl_requests.Session()
+        session.headers.update({
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,de;q=0.8",
+            "Referer": self.MAIN_PAGE_URL,
+        })
+        return session
+
+    def _bootstrap_login(self, session, impersonate):
+        bootstrap_errors = []
+
+        for url in (self.SIGN_IN_PAGE_URL, self.MAIN_PAGE_URL):
+            try:
+                response = session.get(
+                    url,
+                    impersonate=impersonate,
+                    timeout=self.LOGIN_TIMEOUT_SECONDS,
+                )
+            except Exception as exc:
+                bootstrap_errors.append(f"{url}: {exc}")
+                continue
+
+            if self._is_cloudflare_challenge(response):
+                bootstrap_errors.append(f"{url}: Cloudflare challenge ({response.status_code})")
+                continue
+
+            if response.status_code != 200:
+                bootstrap_errors.append(f"{url}: unexpected status {response.status_code}")
+                continue
+
+            csrf = self._extract_csrf_token(response.text, session.cookies)
+            if csrf:
+                return csrf
+
+            bootstrap_errors.append(f"{url}: CSRF token not found")
+
+        raise Exception(
+            "Failed to initialize Letterboxd sign-in page. "
+            + "; ".join(bootstrap_errors)
         )
 
-        if r.status_code != 200:
-            raise Exception(f"Failed to load main page: {r.status_code}")
+    @staticmethod
+    def _extract_csrf_token(response_text, cookie_jar):
+        csrf = cookie_jar.get("com.xk72.webparts.csrf")
+        if csrf:
+            return csrf
 
-        csrf = session.cookies.get("com.xk72.webparts.csrf")
-        if not csrf:
-            m = re.search(r'name="__csrf"\s+value="([^"]+)"', r.text)
-            if m:
-                csrf = m.group(1)
+        match = re.search(r'name="__csrf"\s+value="([^"]+)"', response_text)
+        if match:
+            return match.group(1)
 
-        if not csrf:
-            raise Exception("CSRF token not found after initial GET")
+        return None
 
+    def sign_in(self, username, password, use_2fa_code):
         auth_code = ""
         if use_2fa_code:
             auth_code = input("Enter 2FA code: ")
 
-        data = {
-            "__csrf": csrf,
-            "authenticationCode": auth_code,
-            "username": username,
-            "password": password,
-            "remember": "true"
-        }
+        last_error = None
+        attempts_used = 0
 
-        headers = {
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest",
-            "Origin": "https://letterboxd.com",
-            "Referer": "https://letterboxd.com/",
-        }
+        for attempt in range(1, self.MAX_LOGIN_ATTEMPTS + 1):
+            attempts_used = attempt
+            impersonate = self.LOGIN_IMPERSONATES[(attempt - 1) % len(self.LOGIN_IMPERSONATES)]
+            session = self._create_session()
 
-        resp = session.post(
-            self.LOGIN_URL,
-            data=data,
-            headers=headers,
-            impersonate="chrome",
-            timeout=30
-        )
+            try:
+                csrf = self._bootstrap_login(session, impersonate)
 
-        # Detect Cloudflare page
-        body_snippet = resp.text[:800] if resp.text else ""
-        if resp.status_code == 403 or "Just a moment" in body_snippet or "<title>Just a moment" in body_snippet:
-            raise Exception(f"Forbidden / Cloudflare challenge detected (403). Response snippet: {body_snippet}")
+                data = {
+                    "__csrf": csrf,
+                    "authenticationCode": auth_code,
+                    "username": username,
+                    "password": password,
+                    "remember": "true"
+                }
 
-        if resp.status_code != 200:
-            raise Exception(f"Login failed: {resp.status_code} - {body_snippet[:300]}")
+                headers = {
+                    "Accept": "application/json, text/javascript, */*; q=0.01",
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Origin": "https://letterboxd.com",
+                    "Referer": self.SIGN_IN_PAGE_URL,
+                }
 
-        try:
-            response_data = resp.json()
-        except Exception:
-            raise Exception(f"Unexpected non-json response on login. Snippet: {body_snippet[:800]}")
+                resp = session.post(
+                    self.LOGIN_URL,
+                    data=data,
+                    headers=headers,
+                    impersonate=impersonate,
+                    timeout=self.LOGIN_TIMEOUT_SECONDS
+                )
 
-        self._is_logged_in = response_data.get("result") == "success"
-        self._cookies = session.cookies
-        self._scraper = session
-        self._csrf = csrf
-        return self._is_logged_in
+                self._raise_if_cloudflare_challenge(resp)
+                body_snippet = self._response_snippet(resp)
 
-    def _build_headers(self):
-        cookies_str = f'com.xk72.webparts.csrf={self._csrf};'
+                if resp.status_code != 200:
+                    raise Exception(f"Login failed: {resp.status_code} - {body_snippet[:300]}")
 
-        if hasattr(self._cookies, 'items'):
-            for name, value in self._cookies.items():
-                cookies_str += f'{name}={value}; '
-        else:
-            for cookie in self._cookies:
-                if hasattr(cookie, 'name'):
-                    cookies_str += f'{cookie.name}={cookie.value}; '
-                else:
-                    continue
+                try:
+                    response_data = resp.json()
+                except Exception:
+                    raise Exception(f"Unexpected non-json response on login. Snippet: {body_snippet[:800]}")
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/118.0",
-            "Accept": "*/*",
-            "Accept-Language": "de,en-US;q=0.7,en;q=0.3",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Referer": "https://letterboxd.com/",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest",
-            "Origin": "https://letterboxd.com",
-            "Cookie": cookies_str
-        }
+                self._is_logged_in = response_data.get("result") == "success"
+                if not self._is_logged_in:
+                    messages = response_data.get("messages") or []
+                    raise Exception("Login failed: " + ("; ".join(messages) if messages else "Unknown authentication error"))
 
-        return headers
+                self._scraper = session
+                self._csrf = response_data.get("csrf") or csrf
+                return self._is_logged_in
+
+            except CloudflareChallengeError as exc:
+                last_error = exc
+                if attempt == self.MAX_LOGIN_ATTEMPTS:
+                    break
+                time.sleep(self._retry_delay_seconds(attempt, exc.retry_after_seconds))
+                continue
+            except Exception as exc:
+                last_error = exc
+                break
+
+        raise Exception(f"Login failed after {attempts_used} attempt(s): {last_error}")
 
 
     def download_export_data(self, file_name='letterboxd_export.zip'):
-        url = 'https://letterboxd.com/data/export/'
-
         if not self._is_logged_in or not self._scraper:
             raise Exception('You have to log in to download your export data.')
 
-        try:
-            headers = self._build_headers()
-            response = self._scraper.get(
-                url,
-                headers=headers,
-                impersonate="chrome120",
-                stream=True,
-                timeout=60
-            )
+        last_error = None
+        attempts_used = 0
 
-            body_snippet = ""
-            content_type = response.headers.get("Content-Type", "")
-            if response.status_code == 403 or 'html' in content_type.lower():
-                try:
-                    body_snippet = response.text[:800]
-                except Exception:
-                    body_snippet = ""
-                if response.status_code == 403 or "Just a moment" in body_snippet or "<title>Just a moment" in body_snippet:
-                    raise Exception(f"Forbidden / Cloudflare challenge detected (403). Response snippet: {body_snippet}")
+        for attempt in range(1, self.MAX_DOWNLOAD_ATTEMPTS + 1):
+            attempts_used = attempt
+            impersonate = self.DOWNLOAD_IMPERSONATES[(attempt - 1) % len(self.DOWNLOAD_IMPERSONATES)]
+            try:
+                response = self._scraper.get(
+                    self.EXPORT_URL,
+                    headers={"Referer": self.MAIN_PAGE_URL},
+                    impersonate=impersonate,
+                    stream=True,
+                    timeout=self.DOWNLOAD_TIMEOUT_SECONDS
+                )
 
-            if response.status_code != 200:
-                raise Exception(f"Download failed: {response.status_code}")
+                self._raise_if_cloudflare_challenge(response)
 
-            with open(file_name, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+                if response.status_code != 200:
+                    raise Exception(f"Download failed: {response.status_code}")
 
-            return file_name
+                content_type = response.headers.get("Content-Type", "")
+                if "html" in content_type.lower():
+                    body_snippet = self._response_snippet(response)
+                    raise Exception(
+                        "Download failed: received HTML page instead of export archive. "
+                        f"Response snippet: {body_snippet}"
+                    )
 
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"Unable to get web request: {e}")
+                with open(file_name, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+
+                return file_name
+
+            except CloudflareChallengeError as exc:
+                last_error = exc
+                if attempt == self.MAX_DOWNLOAD_ATTEMPTS:
+                    break
+                time.sleep(self._retry_delay_seconds(attempt, exc.retry_after_seconds))
+                continue
+            except Exception as exc:
+                last_error = exc
+                break
+
+        raise Exception(f"Unable to get web request after {attempts_used} attempt(s): {last_error}")

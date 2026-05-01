@@ -94,15 +94,159 @@
     {% endif %}
 
     <script>
-    async function runAction(name) {
+    const MAX_STATUS_LINES = 80;
+    const STREAMED_TASKS = new Set(['watchlist', 'rating']);
+
+    let currentEventSource = null;
+    let currentTaskName = null;
+    let statusLines = [];
+    let streamRetryTimer = null;
+    let streamRetryDelayMs = 1000;
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function renderStatus(background = '#eef') {
         const status = document.getElementById('status');
         status.style.display = 'block';
-        status.style.background = '#eef';
-        status.innerText = 'Starting ' + name + '...';
+        status.style.background = background;
+        status.innerHTML = statusLines.map(escapeHtml).join('<br>');
+        status.scrollTop = status.scrollHeight;
+    }
+
+    function setStatusLines(lines, background = '#eef') {
+        statusLines = (lines || []).slice(-MAX_STATUS_LINES);
+        renderStatus(background);
+    }
+
+    function setStatusMessage(message, background = '#eef') {
+        setStatusLines([message], background);
+    }
+
+    function appendStatusLine(message, background = '#eef') {
+        statusLines.push(message);
+        if (statusLines.length > MAX_STATUS_LINES) {
+            statusLines = statusLines.slice(statusLines.length - MAX_STATUS_LINES);
+        }
+        renderStatus(background);
+    }
+
+    function closeTaskStream() {
+        if (streamRetryTimer) {
+            clearTimeout(streamRetryTimer);
+            streamRetryTimer = null;
+        }
+        if (currentEventSource) {
+            currentEventSource.close();
+            currentEventSource = null;
+        }
+    }
+
+    function taskBackground(taskState) {
+        if (!taskState) {
+            return '#eef';
+        }
+        if (taskState.running) {
+            return '#eef';
+        }
+        return taskState.status === 'failed' ? '#ffe6e6' : '#e6ffe6';
+    }
+
+    function connectToTaskStream(taskName, initialLogs = []) {
+        closeTaskStream();
+        currentTaskName = taskName;
+        setStatusLines(initialLogs, '#eef');
+        streamRetryDelayMs = 1000;
+
+        const eventSource = new EventSource('/stream/' + taskName + '?replay=0');
+        currentEventSource = eventSource;
+
+        eventSource.onmessage = function (event) {
+            appendStatusLine(event.data, '#eef');
+        };
+
+        eventSource.onerror = async function () {
+            eventSource.close();
+            if (currentEventSource === eventSource) {
+                currentEventSource = null;
+            }
+            if (streamRetryTimer) {
+                return;
+            }
+            streamRetryTimer = setTimeout(async function () {
+                streamRetryTimer = null;
+                try {
+                    await refreshTaskStatus(taskName);
+                    streamRetryDelayMs = 1000;
+                } catch (err) {
+                    appendStatusLine('Status reconnect failed, retrying...', '#eef');
+                    streamRetryDelayMs = Math.min(streamRetryDelayMs * 2, 10000);
+                    if (!streamRetryTimer) {
+                        streamRetryTimer = setTimeout(async function () {
+                            streamRetryTimer = null;
+                            try {
+                                await refreshTaskStatus(taskName);
+                            } catch (retryErr) {
+                                appendStatusLine('Status reconnect failed again.', '#eef');
+                            }
+                        }, streamRetryDelayMs);
+                    }
+                }
+            }, streamRetryDelayMs);
+        };
+    }
+
+    async function fetchTaskStatus() {
+        const res = await fetch('/task/status');
+        if (!res.ok) {
+            throw new Error('Unable to load task status');
+        }
+        return await res.json();
+    }
+
+    async function refreshTaskStatus(preferredTaskName = null) {
+        const data = await fetchTaskStatus();
+        const details = data.details || {};
+        const taskName = preferredTaskName || data.active_task || data.task_name;
+
+        if (!taskName || !details[taskName]) {
+            return data;
+        }
+
+        const taskState = details[taskName];
+        const logs = Array.isArray(taskState.logs) ? taskState.logs : [];
+
+        if (logs.length) {
+            setStatusLines(logs, taskBackground(taskState));
+        } else if (taskState.message) {
+            setStatusMessage(taskState.message, taskBackground(taskState));
+        }
+
+        if (taskState.running) {
+            connectToTaskStream(taskName, logs);
+        } else if (currentTaskName === taskName) {
+            closeTaskStream();
+        }
+
+        return data;
+    }
+
+    async function runAction(name) {
+        setStatusMessage('Starting ' + name + '...', '#eef');
 
         try {
-            if (name === "owned") {
+            if (name === 'owned') {
                 const res = await fetch('/action/' + name, { method: 'POST' });
+                if (!res.ok) {
+                    throw new Error('Owned CSV download failed');
+                }
+
                 const blob = await res.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -112,46 +256,29 @@
                 a.click();
                 a.remove();
                 window.URL.revokeObjectURL(url);
-                status.innerText = "Owned CSV downloaded";
-                status.style.background = '#e6ffe6';
-            } else {
-                const res = await fetch('/action/' + name, { method: 'POST' });
-                const data = await res.json();
-                status.innerText = data.message;
-                status.style.background = '#e6ffe6';
+                setStatusMessage('Owned CSV downloaded', '#e6ffe6');
+                return;
             }
 
-            const MAX_LINES = 50;
-            let logLines = [];
-            if (name === "watchlist") {
-                await fetch('/action/watchlist', { method: 'POST' });
+            const res = await fetch('/action/' + name, { method: 'POST' });
+            const data = await res.json();
 
-                const eventSource = new EventSource('/stream/watchlist');
-                status.innerHTML = "";
-
-                eventSource.onmessage = function (event) {
-                    // Keep only the last MAX_LINES
-                    logLines.push(event.data);
-                    if (logLines.length > MAX_LINES) {
-                        logLines = logLines.slice(logLines.length - MAX_LINES);
-                    }
-                    status.innerHTML = logLines.join('<br>');
-                    status.scrollTop = status.scrollHeight; // auto scroll
-                };
-
-                eventSource.onerror = function () {
-                    eventSource.close();
-                    logLines.push("Stream ended or error occurred");
-                    if (logLines.length > MAX_LINES) {
-                        logLines = logLines.slice(logLines.length - MAX_LINES);
-                    }
-                    status.innerHTML = logLines.join('<br>');
-                    status.scrollTop = status.scrollHeight;
-                };
+            if (!res.ok || !data.success) {
+                if (STREAMED_TASKS.has(name) && String(data.message || '').includes('already running')) {
+                    await refreshTaskStatus(name);
+                    return;
+                }
+                throw new Error(data.message || ('Action failed: ' + name));
             }
+
+            if (STREAMED_TASKS.has(name)) {
+                await refreshTaskStatus(name);
+                return;
+            }
+
+            setStatusMessage(data.message, '#e6ffe6');
         } catch (err) {
-            status.innerText = 'Error: ' + err;
-            status.style.background = '#ffe6e6';
+            setStatusMessage('Error: ' + err.message, '#ffe6e6');
         }
     }
 
@@ -318,47 +445,15 @@
             updateRowStriping(missingTable);
         }
 
-        // Check if a watchlist task is running on page load and reconnect to stream
-        async function checkRunningTask() {
+        async function restoreTaskStatus() {
             try {
-                const res = await fetch('/task/status');
-                const data = await res.json();
-
-                if (data.running && data.task_name === 'watchlist') {
-                    const status = document.getElementById('status');
-                    status.style.display = 'block';
-                    status.style.background = '#eef';
-                    status.innerHTML = 'Reconnecting to running watchlist task...<br>';
-
-                    const eventSource = new EventSource('/stream/watchlist');
-                    let logLines = ['Reconnected to running task...'];
-                    const MAX_LINES = 50;
-
-                    eventSource.onmessage = function (event) {
-                        logLines.push(event.data);
-                        if (logLines.length > MAX_LINES) {
-                            logLines = logLines.slice(logLines.length - MAX_LINES);
-                        }
-                        status.innerHTML = logLines.join('<br>');
-                        status.scrollTop = status.scrollHeight;
-                    };
-
-                    eventSource.onerror = function () {
-                        eventSource.close();
-                        logLines.push("Stream ended or error occurred");
-                        if (logLines.length > MAX_LINES) {
-                            logLines = logLines.slice(logLines.length - MAX_LINES);
-                        }
-                        status.innerHTML = logLines.join('<br>');
-                        status.scrollTop = status.scrollHeight;
-                    };
-                }
+                await refreshTaskStatus();
             } catch (err) {
                 console.error('Error checking task status:', err);
             }
         }
 
-        checkRunningTask();
+        restoreTaskStatus();
      });
 
     </script>

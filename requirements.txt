@@ -4,8 +4,7 @@ requests
 beautifulsoup4
 brotli
 demjson3
-letterboxdpy
 git+https://github.com/nmcassa/letterboxdpy.git
 lxml
 flask
-curl_cffi
+curl_cffi>=0.15.0
