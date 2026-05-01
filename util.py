@@ -34,7 +34,16 @@ def find_movie_by_letterboxd_title(mapping, combination):
     return None
 
 
+def _normalize_title(value):
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
 def remove_from_missing_if_needed(missing, names):
-    names_set = set(names)
-    missing = [movie for movie in missing if movie.name not in names_set]
-    return missing
+    names_set = {_normalize_title(name) for name in names if _normalize_title(name)}
+    if not names_set:
+        return missing
+
+    return [movie for movie in missing if _normalize_title(movie.name) not in names_set]
+

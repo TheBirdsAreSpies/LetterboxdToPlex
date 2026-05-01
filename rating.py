@@ -47,6 +47,7 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
 
             was_missing_names = []
             combination = Movie(name, year)
+            was_missing_names.append(combination.name)
 
             if any(combination.name == existing.name and combination.year == existing.year for existing in
                    to_ignore):  # movie is in ignore list, maybe remove due to the second check after mapping
@@ -60,12 +61,16 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
                 combination = Movie(mapped.plex_title, year)
                 name = combination.name
 
+            was_missing_names.append(name)
+
             calculated_rating = float(stars) * 2
 
             select_query = 'SELECT 1 FROM ratings WHERE title = ? AND rating = ?'
             cursor.execute(select_query, (name, calculated_rating))
             rs = cursor.fetchone()
             if rs:
+                # Keep missing list in sync even when the rating write is skipped.
+                missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                 logger.debug(f'Movie {name} is already rated as {calculated_rating} - SKIP')
                 pbar.update(1)
                 continue
@@ -155,6 +160,7 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
                         if len(matches) == 1:
                             movie = matches[0]
                             logger.info(f'Found {name} ({year}), will use this for rating update')
+                            was_missing_names.append(movie.title)
                             missing = util.remove_from_missing_if_needed(missing, was_missing_names)
 
                         elif len(matches) > 1:
@@ -174,6 +180,7 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
                             movie = movies.getGuid(f'tmdb://{tmdb_id}')
                             if movie:
                                 logger.info(f'Found {name} ({year}) via TMDb ID, will use for rating update')
+                                was_missing_names.append(movie.title)
                                 missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                             else:
                                 raise NotFound
@@ -183,6 +190,7 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
                         movie = movies.getGuid(f'tmdb://{tmdb_id}')
                         if movie:
                             logger.info(f'Found {name} ({year}) via TMDb ID, will use for rating update')
+                            was_missing_names.append(movie.title)
                             missing = util.remove_from_missing_if_needed(missing, was_missing_names)
                         else:
                             raise NotFound
@@ -203,6 +211,7 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
                 if len(result) == 1:
                     logger.info(f'Found {name} ({year}), will rate')
                     movie: plexapi.video.Movie = result[0]
+                    was_missing_names.append(movie.title)
                     missing = util.remove_from_missing_if_needed(missing, was_missing_names)
 
                 elif len(result) > 1:
