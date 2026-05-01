@@ -9,49 +9,54 @@
         table { border-collapse: collapse; width: 100%; box-shadow: 0 0 6px rgba(0,0,0,0.1); background: white; }
         table.two-tone tbody tr:nth-child(odd) td { background: #ffffff; }
         table.two-tone tbody tr:nth-child(even) td { background: #f6f8fa; }
-        table.two-tone tbody tr.alt td { background: #f6f8fa; }
-        table.two-tone tbody tr:not(.alt) td { background: #ffffff; }
         table.two-tone tbody tr:hover td { background: #e8f4ff; }
         th, td { border: 1px solid #ddd; padding: 0.6rem; text-align: left; }
-        th { background: #eee; }
+        th { background: #eee; user-select: none; }
         button { padding: 0.4rem 0.8rem; cursor: pointer; background: #444; color: white; border: none; border-radius: 4px; }
         button:hover { background: #000; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
         .danger { background: #d33; }
         .danger:hover { background: #a00; }
-        .action-bar { margin-bottom: 1.5rem; }
-        #status { padding: 0.8rem; background: #eef; border-radius: 5px; margin-bottom: 1rem; display:none; }
-
-        .action-bar > div { display:flex; gap:0.5rem; align-items:center; }
-        .action-bar button { white-space:nowrap; }
+        .action-bar { margin-bottom: 1.5rem; display:flex; justify-content:space-between; align-items:center; gap: 0.75rem; }
+        .action-bar > div { display:flex; gap:0.5rem; align-items:center; flex-wrap: wrap; }
+        .status { padding: 0.8rem; border-radius: 5px; margin-bottom: 1rem; border: 1px solid #ccc; display: none; }
+        .status.visible { display: block; }
+        .status.log { overflow-y:auto; max-height:300px; }
+        .status.info { background: #eef; }
+        .status.success { background: #e6ffe6; }
+        .status.error { background: #ffe6e6; }
         .autoselection-row { display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem; padding:0.5rem; border:1px solid #ccc; margin-bottom:0.5rem; background:#fff; }
         .autoselection-row .title { margin-right:0.5rem; font-weight:600; }
-
         .table-wrap { width:100%; overflow-x:auto; }
+        .sortable { cursor: pointer; }
 
         @media (max-width: 600px) {
             body { margin: 0.6rem; }
             button { padding: 0.35rem 0.5rem; font-size: 14px; }
             .action-bar { flex-direction: column; align-items: stretch; gap: 0.6rem; }
-            .action-bar > div { flex-wrap:wrap; }
             th, td { padding: 0.4rem; font-size: 14px; }
-            #status { max-height: 220px; font-size: 13px; }
+            .status.log { max-height: 220px; font-size: 13px; }
             .autoselection-row { flex-direction:column; align-items:flex-start; }
             .autoselection-row .title { margin-bottom:0.25rem; }
         }
     </style>
 </head>
 <body>
+<div id="app">
     <h1>LetterboxdToPlex Web</h1>
 
-    <div id="status" style="overflow-y:auto; max-height:300px; border:1px solid #ccc; padding:0.5rem; background:#eef;"></div>
+    <div class="status" :class="[statusClass, { visible: statusVisible, log: isLogView }]">
+        <div v-if="isLogView" v-html="formattedLog"></div>
+        <div v-else>[[ statusText ]]</div>
+    </div>
 
-    <div class="action-bar" style="display:flex; justify-content:space-between; align-items:center;">
+    <div class="action-bar">
         <div>
-            <button onclick="runAction('watchlist')">Synchronize Watchlist</button>
-            <button onclick="runAction('owned')">Create Owned List</button>
-            <button onclick="runAction('rating')">Update Ratings</button>
-            <button onclick="runAction('cleanup_missing')">Check Entries</button>
-            <button onclick="runAction('strip_missing_years')">Clear Release Dates</button>
+            <button :disabled="actionInProgress" @click="runAction('watchlist')">Synchronize Watchlist</button>
+            <button :disabled="actionInProgress" @click="runAction('owned')">Create Owned List</button>
+            <button :disabled="actionInProgress" @click="runAction('rating')">Update Ratings</button>
+            <button :disabled="actionInProgress" @click="runAction('cleanup_missing')">Check Entries</button>
+            <button :disabled="actionInProgress" @click="runAction('strip_missing_years')">Clear Release Dates</button>
         </div>
         <div>
             <a href="/config" style="text-decoration:none; color:#444; font-weight:bold;">Edit Config</a>
@@ -59,308 +64,49 @@
     </div>
 
     <h2>Pending Autoselections</h2>
-    <div id="autoselectionContainer">
-        <p id="noPending">No pending autoselections</p>
+    <div>
+        <p v-if="autoselections.length === 0">No pending autoselections</p>
+        <div v-for="sel in autoselections" :key="sel.combination.name + '-' + sel.combination.year" class="autoselection-row">
+            <div class="title">[[ sel.combination.name ]] ([[ sel.combination.year ]])</div>
+            <div style="display:inline-flex; gap:0.3rem; flex-wrap:wrap;">
+                <button
+                    v-for="opt in sel.options"
+                    :key="opt.key"
+                    @click="chooseAutoselection(sel, opt)"
+                >
+                    [[ optionLabel(opt) ]]
+                </button>
+                <button class="danger" @click="skipAutoselection(sel)">Skip</button>
+            </div>
+        </div>
     </div>
 
     <h2>Missing Movies</h2>
-    {% if missing %}
-    <div class="table-wrap">
-    <table id="missingTable" class="two-tone">
-        <tr>
-            <th onclick="sortTable(0)">Title ▲▼</th>
-            <th onclick="sortTable(1)">Year ▲▼</th>
-            <th onclick="sortTable(2)">Release Date ▲▼</th>
-            <th>Actions</th>
-        </tr>
-        {% for item in missing %}
-        <tr>
-            <td>{{ item.name }}</td>
-            <td>{{ item.year }}</td>
-            <td>
-                {% if item.release_date %}
-                    {{ item.release_date.split('T')[0].split(' ')[0] }}
-                {% else %}
-                    -
-                {% endif %}
-            </td>
-            <td><button class="danger" onclick="ignoreItem('{{ item.name }}')">Ignore Movie</button></td>
-        </tr>
-        {% endfor %}
-    </table>
+    <p v-if="sortedMissing.length === 0">No missing movies</p>
+    <div class="table-wrap" v-else>
+        <table class="two-tone">
+            <thead>
+            <tr>
+                <th class="sortable" @click="setSort('name')">Title [[ sortIndicator('name') ]]</th>
+                <th class="sortable" @click="setSort('year')">Year [[ sortIndicator('year') ]]</th>
+                <th class="sortable" @click="setSort('release_date')">Release Date [[ sortIndicator('release_date') ]]</th>
+                <th>Actions</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr v-for="item in sortedMissing" :key="item.name + '-' + String(item.year)">
+                <td>[[ item.name ]]</td>
+                <td>[[ item.year ]]</td>
+                <td>[[ formatReleaseDate(item.release_date) ]]</td>
+                <td>
+                    <button class="danger" @click="ignoreItem(item.name)">Ignore Movie</button>
+                </td>
+            </tr>
+            </tbody>
+        </table>
     </div>
-    {% else %}
-    <p>No missing movies</p>
-    {% endif %}
+</div>
 
-    <script>
-    async function runAction(name) {
-        const status = document.getElementById('status');
-        status.style.display = 'block';
-        status.style.background = '#eef';
-        status.innerText = 'Starting ' + name + '...';
-
-        try {
-            if (name === "owned") {
-                const res = await fetch('/action/' + name, { method: 'POST' });
-                const blob = await res.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'owned.csv';
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
-                status.innerText = "Owned CSV downloaded";
-                status.style.background = '#e6ffe6';
-            } else {
-                const res = await fetch('/action/' + name, { method: 'POST' });
-                const data = await res.json();
-                status.innerText = data.message;
-                status.style.background = '#e6ffe6';
-            }
-
-            const MAX_LINES = 50;
-            let logLines = [];
-            if (name === "watchlist") {
-                await fetch('/action/watchlist', { method: 'POST' });
-
-                const eventSource = new EventSource('/stream/watchlist');
-                status.innerHTML = "";
-
-                eventSource.onmessage = function (event) {
-                    // Keep only the last MAX_LINES
-                    logLines.push(event.data);
-                    if (logLines.length > MAX_LINES) {
-                        logLines = logLines.slice(logLines.length - MAX_LINES);
-                    }
-                    status.innerHTML = logLines.join('<br>');
-                    status.scrollTop = status.scrollHeight; // auto scroll
-                };
-
-                eventSource.onerror = function () {
-                    eventSource.close();
-                    logLines.push("Stream ended or error occurred");
-                    if (logLines.length > MAX_LINES) {
-                        logLines = logLines.slice(logLines.length - MAX_LINES);
-                    }
-                    status.innerHTML = logLines.join('<br>');
-                    status.scrollTop = status.scrollHeight;
-                };
-            }
-        } catch (err) {
-            status.innerText = 'Error: ' + err;
-            status.style.background = '#ffe6e6';
-        }
-    }
-
-    async function ignoreItem(name) {
-        if (!confirm('Do you really want to add „' + name + '“ to ignore list?')) return;
-        const res = await fetch('/ignore', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name })
-        });
-        if (res.ok) location.reload();
-    }
-
-    function sortTable(colIndex) {
-        const table = document.getElementById("missingTable");
-        const rows = Array.from(table.rows).slice(1);
-        let asc = table.getAttribute(`data-sort-col`) != colIndex || table.getAttribute(`data-sort-dir`) == "desc";
-
-        rows.sort((a, b) => {
-            let aText = a.cells[colIndex].innerText.trim();
-            let bText = b.cells[colIndex].innerText.trim();
-
-            if (colIndex === 2) {
-                const parseDate = (txt) => {
-                    if (!txt) return null;
-                    const t = txt.trim().toLowerCase();
-                    if (t === '-' || t === 'n/a' || t === '') return null;
-                    const d = Date.parse(txt);
-                    return isNaN(d) ? null : d;
-                };
-
-                const aDate = parseDate(aText);
-                const bDate = parseDate(bText);
-
-                if (aDate === null && bDate === null) return 0;
-                if (aDate === null) return 1;
-                if (bDate === null) return -1;
-
-                return asc ? aDate - bDate : bDate - aDate;
-            }
-
-            let aNum = parseFloat(aText), bNum = parseFloat(bText);
-            if (!isNaN(aNum) && !isNaN(bNum)) {
-                return asc ? aNum - bNum : bNum - aNum;
-            }
-
-            return asc ? aText.localeCompare(bText) : bText.localeCompare(aText);
-        });
-
-        const target = table.tBodies && table.tBodies[0] ? table.tBodies[0] : table;
-        rows.forEach(row => target.appendChild(row));
-
-        table.setAttribute("data-sort-col", colIndex);
-        table.setAttribute("data-sort-dir", asc ? "asc" : "desc");
-
-        // Update explicit zebra striping classes so the two-tone stays consistent
-        updateRowStriping(table);
-    }
-
-    // Apply or refresh alternating row classes (.alt) for zebra striping.
-    function updateRowStriping(table) {
-        const tbody = table.tBodies && table.tBodies[0];
-        let rows = [];
-        if (tbody) {
-            rows = Array.from(tbody.rows);
-        } else {
-            // Fallback: use table.rows but skip the header row
-            rows = Array.from(table.rows).slice(1);
-        }
-
-        rows.forEach((tr, i) => {
-            if ((i % 2) === 1) tr.classList.add('alt'); else tr.classList.remove('alt');
-        });
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-        const autoselectionContainer = document.getElementById('autoselectionContainer');
-
-        async function loadAutoselections() {
-            const res = await fetch('/autoselections');
-            const data = await res.json();
-
-            autoselectionContainer.innerHTML = '';
-
-            if (!data.length) {
-                const p = document.createElement('p');
-                p.innerText = 'No pending autoselections';
-                autoselectionContainer.appendChild(p);
-                return;
-            }
-
-            data.forEach(sel => {
-                const row = document.createElement('div');
-                row.className = 'autoselection-row';
-
-                // Title
-                const title = document.createElement('div');
-                title.className = 'title';
-                title.innerHTML = `${sel.combination.name} (${sel.combination.year})`;
-                row.appendChild(title);
-
-                // Buttons container
-                const buttonsContainer = document.createElement('div');
-                buttonsContainer.style.display = 'inline-flex';
-                buttonsContainer.style.gap = '0.3rem'; // small gap between buttons
-                buttonsContainer.style.flexWrap = 'wrap';
-                row.appendChild(buttonsContainer);
-
-                // Movie options buttons
-                sel.options.forEach(opt => {
-                    const btn = document.createElement('button');
-                    btn.innerText = `${opt.title} (${opt.year})` + (opt.edition ? ` - ${opt.edition}` : '');
-                    btn.onclick = async () => {
-                        await fetch('/autoselections/choose', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                name: sel.combination.name,
-                                year: sel.combination.year,
-                                selected_key: opt.key
-                            })
-                        });
-                        loadAutoselections(); // refresh list
-                    };
-                    buttonsContainer.appendChild(btn);
-                });
-
-                // Skip button
-                const skipBtn = document.createElement('button');
-                skipBtn.innerText = 'Skip';
-                skipBtn.className = 'danger';
-                skipBtn.onclick = async () => {
-                    await fetch('/autoselections/skip', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            name: sel.combination.name,
-                            year: sel.combination.year
-                        })
-                    });
-                    loadAutoselections(); // refresh list
-                };
-                buttonsContainer.appendChild(skipBtn);
-
-                row.appendChild(buttonsContainer);
-                autoselectionContainer.appendChild(row);
-            });
-        }
-
-        setInterval(loadAutoselections, 5000);
-        loadAutoselections();
-
-        // Ensure zebra striping is applied on initial page load
-        const missingTable = document.getElementById('missingTable');
-        if (missingTable) {
-            // Make sure there's a tbody element for consistent DOM updates
-            if (!missingTable.tBodies || missingTable.tBodies.length === 0) {
-                const newTbody = document.createElement('tbody');
-                // move existing data rows (skip the header at rows[0]) into tbody
-                const dataRows = Array.from(missingTable.rows).slice(1);
-                dataRows.forEach(r => newTbody.appendChild(r));
-                missingTable.appendChild(newTbody);
-            }
-            updateRowStriping(missingTable);
-        }
-
-        // Check if a watchlist task is running on page load and reconnect to stream
-        async function checkRunningTask() {
-            try {
-                const res = await fetch('/task/status');
-                const data = await res.json();
-
-                if (data.running && data.task_name === 'watchlist') {
-                    const status = document.getElementById('status');
-                    status.style.display = 'block';
-                    status.style.background = '#eef';
-                    status.innerHTML = 'Reconnecting to running watchlist task...<br>';
-
-                    const eventSource = new EventSource('/stream/watchlist');
-                    let logLines = ['Reconnected to running task...'];
-                    const MAX_LINES = 50;
-
-                    eventSource.onmessage = function (event) {
-                        logLines.push(event.data);
-                        if (logLines.length > MAX_LINES) {
-                            logLines = logLines.slice(logLines.length - MAX_LINES);
-                        }
-                        status.innerHTML = logLines.join('<br>');
-                        status.scrollTop = status.scrollHeight;
-                    };
-
-                    eventSource.onerror = function () {
-                        eventSource.close();
-                        logLines.push("Stream ended or error occurred");
-                        if (logLines.length > MAX_LINES) {
-                            logLines = logLines.slice(logLines.length - MAX_LINES);
-                        }
-                        status.innerHTML = logLines.join('<br>');
-                        status.scrollTop = status.scrollHeight;
-                    };
-                }
-            } catch (err) {
-                console.error('Error checking task status:', err);
-            }
-        }
-
-        checkRunningTask();
-     });
-
-    </script>
+<script type="module" src="{{ url_for('static', filename='js/index-app.js') }}"></script>
 </body>
 </html>

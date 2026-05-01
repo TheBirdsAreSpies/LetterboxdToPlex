@@ -151,8 +151,12 @@ def run_rating(logger, progress_callback=None):
 
 @app.route("/")
 def index():
-    missing = load_json(config.missing_path)
-    return render_template("index.html", missing=missing)
+    return render_template("index.html")
+
+
+@app.route("/missing")
+def get_missing():
+    return jsonify(load_json(config.missing_path))
 
 @app.route("/ignore", methods=["POST"])
 def ignore():

@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Edit Config</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -17,7 +18,7 @@ h1 {
     margin-bottom: 2rem;
     color: #222;
 }
-form {
+.form-wrap {
     max-width: 1000px;
     margin: auto;
 }
@@ -27,14 +28,13 @@ form {
     margin-bottom: 1rem;
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0,0,0,0.08);
-    transition: all 0.3s ease;
 }
 .section h2 {
     margin: 0;
     font-size: 1.2rem;
     display: flex;
     justify-content: space-between;
-    cursor: pointer;
+    align-items: center;
 }
 .section-content {
     margin-top: 0.8rem;
@@ -53,6 +53,7 @@ input, select, textarea {
     border-radius: 5px;
     font-size: 0.95rem;
     transition: all 0.2s;
+    box-sizing: border-box;
 }
 input[type="checkbox"] {
     width: auto;
@@ -61,6 +62,12 @@ input[type="checkbox"] {
 input.changed, select.changed, textarea.changed {
     border-color: #4CAF50;
     background-color: #e6ffe6;
+}
+.button-row {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: center;
+    flex-wrap: wrap;
 }
 button {
     padding: 0.6rem 1.2rem;
@@ -71,21 +78,19 @@ button {
     color: white;
     font-weight: 600;
     font-size: 1rem;
-    margin-top: 1rem;
     transition: background 0.2s;
 }
 button:hover {
     background: #45a049;
 }
-#status {
-    margin-top: 1rem;
-    padding: 0.8rem;
-    border-radius: 6px;
-    display: none;
-    font-weight: 600;
+.secondary {
+    background: #666;
+}
+.secondary:hover {
+    background: #555;
 }
 .toggle-btn {
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     color: #555;
     background: #eee;
     border: none;
@@ -96,158 +101,98 @@ button:hover {
 .toggle-btn:hover {
     background: #ddd;
 }
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.7rem;
+}
+.checkbox-row label {
+    margin: 0;
+}
+.status {
+    margin: 1rem auto 0;
+    padding: 0.8rem;
+    border-radius: 6px;
+    font-weight: 600;
+    max-width: 1000px;
+}
+.status.success { background: #e6ffe6; }
+.status.error { background: #ffe6e6; }
+
+@media (max-width: 600px) {
+    body { padding: 0.8rem; }
+    .section { padding: 0.8rem; }
+}
 </style>
 </head>
 <body>
-<h1>Edit Config</h1>
+<div id="app" class="form-wrap">
+    <h1>Edit Config</h1>
 
-<form id="configForm"></form>
+    <div v-for="(keys, sectionName) in sections" :key="sectionName" class="section">
+        <h2>
+            <span>[[ sectionName ]]</span>
+            <button type="button" class="toggle-btn" @click="toggleSection(sectionName)">
+                [[ isOpen(sectionName) ? 'Hide' : 'Show' ]]
+            </button>
+        </h2>
 
-<button onclick="window.location.href='/'">Back</button>
-<button onclick="saveConfig()">Save Config</button>
+        <div class="section-content" v-if="isOpen(sectionName)">
+            <template v-for="key in keys" :key="key">
+                <template v-if="hasKey(key)">
+                    <div v-if="fieldType(key) === 'boolean'" class="checkbox-row">
+                        <input
+                            type="checkbox"
+                            :id="key"
+                            v-model="formValues[key]"
+                            :class="{ changed: isChanged(key) }"
+                        >
+                        <label :for="key">[[ key ]]</label>
+                    </div>
 
-<div id="status"></div>
+                    <template v-else>
+                        <label :for="key">[[ key ]]</label>
 
-<script>
-const sections = {
-    "plex settings": ["baseurl", "token"],
-    "letterboxd settings": ["use_api", "api_username", "api_password", "api_use_2fa_code"],
-    "general settings": ["use_playlist_as_watchlist","use_builtin_watchlist","sort_by_title",
-                         "ignore_words","ignore_movies_in_existing_watchlist","include_watched_not_rated"],
-    "plex watchlist as playlist settings": ["existing_watchlist_name","watchlist_name_to_create"],
-    "tmdb": ["tmdb_use_api","tmdb_cache","tmdb_invalidate_cache","tmdb_invalidate_cache_days",
-             "tmdb_api_key","tmdb_language_code","tmdb_release_country_code","tmdb_release_type"],
-    "existing files": ["watchlist_path","watched_path","ratings_path"],
-    "files to create": ["missing_path","ignore_path","mapping_path","autoselection_path"]
-};
+                        <select
+                            v-if="fieldType(key) === 'enum'"
+                            :id="key"
+                            v-model="formValues[key]"
+                            :class="{ changed: isChanged(key) }"
+                        >
+                            <option v-for="ev in enumValues" :key="ev" :value="ev">[[ enumLabel(ev) ]]</option>
+                        </select>
 
-async function loadConfig() {
-    const res = await fetch('/config/data');
-    const cfg = await res.json();
+                        <textarea
+                            v-else-if="fieldType(key) === 'array'"
+                            :id="key"
+                            v-model="formValues[key]"
+                            :class="{ changed: isChanged(key) }"
+                        ></textarea>
 
-    const form = document.getElementById('configForm');
-    form.innerHTML = '';
+                        <input
+                            v-else
+                            type="text"
+                            :id="key"
+                            v-model="formValues[key]"
+                            :class="{ changed: isChanged(key) }"
+                        >
+                    </template>
+                </template>
+            </template>
+        </div>
+    </div>
 
-    for (const [sectionName, keys] of Object.entries(sections)) {
-        const sectionDiv = document.createElement('div');
-        sectionDiv.className = 'section';
+    <div class="button-row">
+        <button type="button" class="secondary" @click="goBack">Back</button>
+        <button type="button" @click="saveConfig">Save Config</button>
+    </div>
 
-        const h2 = document.createElement('h2');
-        h2.textContent = sectionName;
+    <div v-if="status.visible" class="status" :class="status.success ? 'success' : 'error'">
+        [[ status.message ]]
+    </div>
+</div>
 
-        const toggleBtn = document.createElement('button');
-        toggleBtn.type = 'button';
-        toggleBtn.textContent = 'Toggle';
-        toggleBtn.className = 'toggle-btn';
-        toggleBtn.onclick = () => {
-            contentDiv.style.display = contentDiv.style.display === 'none' ? 'block' : 'none';
-        };
-        h2.appendChild(toggleBtn);
-        sectionDiv.appendChild(h2);
-
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'section-content';
-
-        for (const key of keys) {
-            if (!(key in cfg)) continue;
-            const value = cfg[key];
-            const label = document.createElement('label');
-            label.textContent = key;
-            label.htmlFor = key;
-
-            let input;
-            if (key === 'tmdb_release_type') {
-                input = document.createElement('select');
-                input.id = key;
-                input.name = key;
-                const enumValues = ["ReleaseType.PREMIERE",
-                                    "ReleaseType.THEATRICAL_LIMITED",
-                                    "ReleaseType.THEATRICAL",
-                                    "ReleaseType.DIGITAL",
-                                    "ReleaseType.PHYSICAL",
-                                    "ReleaseType.TV"];
-                enumValues.forEach(ev => {
-                    const opt = document.createElement('option');
-                    opt.value = ev;
-                    opt.textContent = ev.split('.')[1];
-                    if (ev === value) opt.selected = true;
-                    input.appendChild(opt);
-                });
-            } else if (typeof value === 'boolean') {
-                input = document.createElement('input');
-                input.type = 'checkbox';
-                input.id = key;
-                input.name = key;
-                input.checked = value;
-            } else if (Array.isArray(value)) {
-                input = document.createElement('textarea');
-                input.id = key;
-                input.name = key;
-                input.value = value.join(', ');
-            } else {
-                input = document.createElement('input');
-                input.type = 'text';
-                input.id = key;
-                input.name = key;
-                input.value = value;
-            }
-
-            // highlight changes
-            const originalValue = value;
-            input.addEventListener('input', () => {
-                let changed = false;
-                if (input.type === 'checkbox') changed = input.checked !== originalValue;
-                else if (input.tagName === 'TEXTAREA') changed = input.value.split(',').map(v=>v.trim()).join() !== originalValue.join();
-                else changed = input.value !== originalValue;
-                input.classList.toggle('changed', changed);
-            });
-
-            contentDiv.appendChild(label);
-            contentDiv.appendChild(input);
-        }
-
-        sectionDiv.appendChild(contentDiv);
-        form.appendChild(sectionDiv);
-    }
-}
-
-async function saveConfig() {
-    const form = document.getElementById('configForm');
-    const data = {};
-
-    for (const [sectionName, keys] of Object.entries(sections)) {
-        for (const key of keys) {
-            const el = document.getElementById(key);
-            if (!el) continue;
-            let value;
-            if (el.type === 'checkbox') value = el.checked;
-            else if (el.tagName === 'TEXTAREA') value = el.value.split(',').map(v => v.trim());
-            else value = el.value;
-
-            data[key] = value;
-        }
-    }
-
-    // Convert enum string back to enum if needed
-    if (data.tmdb_release_type) {
-        const enumStr = data.tmdb_release_type.split('.')[1];
-        data.tmdb_release_type = "ReleaseType." + enumStr;
-    }
-
-    const res = await fetch('/config/save', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(data)
-    });
-
-    const result = await res.json();
-    const status = document.getElementById('status');
-    status.style.display = 'block';
-    status.innerText = result.message;
-    status.style.background = result.success ? '#e6ffe6' : '#ffe6e6';
-}
-
-loadConfig();
-</script>
+<script type="module" src="{{ url_for('static', filename='js/config-app.js') }}"></script>
 </body>
 </html>

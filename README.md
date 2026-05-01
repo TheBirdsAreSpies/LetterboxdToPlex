@@ -128,6 +128,8 @@ This option will import your set rating from letterboxd to your local Plex libra
 
 You can also run this with a web interface, where you can ignore movies easily. Run with argument **--web**.
 There is also a page to change your config.
+The web UI is implemented with Vue 3 (loaded via CDN), so no additional frontend build step is required.
+Page-specific app entry files and reusable Vue composables are located in `static/js/`.
 
 ## Used libraries
 
