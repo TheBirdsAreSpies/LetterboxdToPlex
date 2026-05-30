@@ -603,10 +603,13 @@ def autoselection_skip():
 def main():
     global plex, movies
 
+    os.makedirs("data", exist_ok=True)
+    os.makedirs("config", exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[logging.FileHandler('ltp.log', encoding='utf-8')]
+        handlers=[logging.FileHandler(os.path.join("data", "ltp.log"), encoding='utf-8')]
     )
 
     parser = argparse.ArgumentParser(prog='LetterboxdToPlex',
