@@ -117,6 +117,29 @@ class MovieDetails:
         self.vote_count = data.get("vote_count")
 
 
+def __normalize_release_type_value(value):
+    if isinstance(value, ReleaseType):
+        return str(value.value)
+
+    if isinstance(value, int):
+        return str(value)
+
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate.isdigit():
+            return candidate
+
+        if "." in candidate:
+            candidate = candidate.split(".")[-1]
+
+        if candidate in ReleaseType.__members__:
+            return str(ReleaseType[candidate].value)
+
+        return candidate
+
+    return str(value)
+
+
 def __get_headers():
     headers = {
         "accept": "application/json",
@@ -315,14 +338,14 @@ def release_date(movie_id: str):
     data = json.loads(response.text)
     movie_release_info = MovieReleaseInfo(data)
 
-    release_type_value = getattr(config.tmdb_release_type, "value", config.tmdb_release_type)
+    release_type_value = __normalize_release_type_value(config.tmdb_release_type)
 
     filtered_release = [
         rd
         for country in movie_release_info.results
         if country.iso_3166_1 == config.tmdb_release_country_code
         for rd in country.release_dates
-        if str(rd.type) == str(release_type_value)
+        if __normalize_release_type_value(rd.type) == release_type_value
     ]
 
     if len(filtered_release) > 0:
