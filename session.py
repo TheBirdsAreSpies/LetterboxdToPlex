@@ -5,6 +5,11 @@ from typing import Optional
 
 from curl_cffi import requests as curl_requests
 
+try:
+    import cloudscraper
+except Exception:
+    cloudscraper = None
+
 
 class CloudflareChallengeError(Exception):
     def __init__(self, message, retry_after_seconds=None):
@@ -33,6 +38,14 @@ class Session:
     _CHALLENGE_MARKERS = (
         "Just a moment",
         "<title>Just a moment",
+    )
+
+    _RETRYABLE_LOGIN_ERROR_MARKERS = (
+        "The form on this page had expired and could not be accepted",
+        "form on this page had expired",
+        "form had expired",
+        "csrf token not found",
+        "unexpected non-json response on login",
     )
 
     def __init__(self, username: str, password: str, use_2fa_code):
@@ -95,22 +108,82 @@ class Session:
         })
         return session
 
+    def _create_cloudscraper_session(self):
+        if cloudscraper is None:
+            raise Exception("Automatic Cloudflare solving requires the optional 'cloudscraper' dependency.")
+
+        session = cloudscraper.create_scraper(browser={
+            "browser": "chrome",
+            "platform": "windows",
+            "mobile": False,
+        })
+        session.headers.update({
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,de;q=0.8",
+            "Referer": self.MAIN_PAGE_URL,
+        })
+        return session
+
+    @staticmethod
+    def _request(session, method_name, url, impersonate=None, **kwargs):
+        method = getattr(session, method_name)
+        if impersonate is not None:
+            try:
+                return method(url, impersonate=impersonate, **kwargs)
+            except TypeError as exc:
+                if "impersonate" not in str(exc):
+                    raise
+        return method(url, **kwargs)
+
+    def _copy_cookies(self, source_session, target_session):
+        try:
+            for cookie in source_session.cookies:
+                target_session.cookies.set(cookie.name, cookie.value, domain=cookie.domain, path=cookie.path)
+        except Exception:
+            pass
+
+    def _switch_to_cloudscraper(self):
+        if self._scraper is not None and getattr(self._scraper, "__class__", None) is not None:
+            module_name = self._scraper.__class__.__module__
+            if module_name.startswith("cloudscraper"):
+                return self._scraper
+
+        browser_session = self._create_cloudscraper_session()
+        if self._scraper is not None:
+            self._copy_cookies(self._scraper, browser_session)
+
+        self._scraper = browser_session
+        return self._scraper
+
+    def _request_with_cloudflare_recovery(self, session, method_name, url, impersonate=None, **kwargs):
+        response = self._request(session, method_name, url, impersonate=impersonate, **kwargs)
+        if self._is_cloudflare_challenge(response):
+            browser_session = self._switch_to_cloudscraper()
+            response = self._request(browser_session, method_name, url, **kwargs)
+
+        self._raise_if_cloudflare_challenge(response)
+        return response
+
+    @classmethod
+    def _is_retryable_login_error(cls, exc):
+        message = str(exc).lower()
+        return any(marker in message for marker in cls._RETRYABLE_LOGIN_ERROR_MARKERS)
+
     def _bootstrap_login(self, session, impersonate):
         bootstrap_errors = []
 
         for url in (self.SIGN_IN_PAGE_URL, self.MAIN_PAGE_URL):
             try:
-                response = session.get(
+                response = self._request_with_cloudflare_recovery(
+                    session,
+                    "get",
                     url,
                     impersonate=impersonate,
                     timeout=self.LOGIN_TIMEOUT_SECONDS,
                 )
+                session = self._scraper or session
             except Exception as exc:
                 bootstrap_errors.append(f"{url}: {exc}")
-                continue
-
-            if self._is_cloudflare_challenge(response):
-                bootstrap_errors.append(f"{url}: Cloudflare challenge ({response.status_code})")
                 continue
 
             if response.status_code != 200:
@@ -155,6 +228,7 @@ class Session:
 
             try:
                 csrf = self._bootstrap_login(session, impersonate)
+                session = self._scraper or session
 
                 data = {
                     "__csrf": csrf,
@@ -172,15 +246,15 @@ class Session:
                     "Referer": self.SIGN_IN_PAGE_URL,
                 }
 
-                resp = session.post(
+                resp = self._request_with_cloudflare_recovery(
+                    session,
+                    "post",
                     self.LOGIN_URL,
+                    impersonate=impersonate,
                     data=data,
                     headers=headers,
-                    impersonate=impersonate,
-                    timeout=self.LOGIN_TIMEOUT_SECONDS
+                    timeout=self.LOGIN_TIMEOUT_SECONDS,
                 )
-
-                self._raise_if_cloudflare_challenge(resp)
                 body_snippet = self._response_snippet(resp)
 
                 if resp.status_code != 200:
@@ -208,6 +282,9 @@ class Session:
                 continue
             except Exception as exc:
                 last_error = exc
+                if self._is_retryable_login_error(exc) and attempt < self.MAX_LOGIN_ATTEMPTS:
+                    time.sleep(self._retry_delay_seconds(attempt))
+                    continue
                 break
 
         raise Exception(f"Login failed after {attempts_used} attempt(s): {last_error}")
@@ -224,15 +301,16 @@ class Session:
             attempts_used = attempt
             impersonate = self.DOWNLOAD_IMPERSONATES[(attempt - 1) % len(self.DOWNLOAD_IMPERSONATES)]
             try:
-                response = self._scraper.get(
+                response = self._request_with_cloudflare_recovery(
+                    self._scraper,
+                    "get",
                     self.EXPORT_URL,
-                    headers={"Referer": self.MAIN_PAGE_URL},
                     impersonate=impersonate,
+                    headers={"Referer": self.MAIN_PAGE_URL},
                     stream=True,
                     timeout=self.DOWNLOAD_TIMEOUT_SECONDS
                 )
 
-                self._raise_if_cloudflare_challenge(response)
 
                 if response.status_code != 200:
                     raise Exception(f"Download failed: {response.status_code}")

@@ -30,6 +30,8 @@ Or else you can also:
 
 3.1 Update `config.py` and set the field `use_api` to `True`. Also update fields `api_username` and `api_password` to download the zip file automatically.
 
+   The live Letterboxd download now automatically retries Cloudflare-protected pages with a browser-like solver (`cloudscraper`). If Letterboxd still blocks the request, you can keep using the manual ZIP export as a fallback.
+
 5. Run `python main.py` with param `-w`
 
 
@@ -136,6 +138,8 @@ There is also a page to change your config.
 [tqdm](https://github.com/tqdm/tqdm)
 
 [letterboxdpy](https://github.com/nmcassa/letterboxdpy)
+
+[cloudscraper](https://github.com/VeNoMouS/cloudscraper)
 
 
 ## Examples
