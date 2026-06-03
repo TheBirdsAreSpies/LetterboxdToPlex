@@ -5,6 +5,8 @@ import logging
 import queue
 import threading
 import time
+import inspect
+from pathlib import Path
 
 from flask import Flask, jsonify, request, Response, render_template
 from enum import Enum
@@ -16,6 +18,7 @@ import owned
 import rating
 import tmdb
 import watchlist
+import util
 import zipfile
 import selector
 
@@ -52,13 +55,36 @@ def log_progress(progress_callback, message):
 
 
 def _existing_paths(paths):
-    return [path for path in paths if os.path.exists(path)]
+    resolved = []
+    for path in paths:
+        found = util.resolve_existing_path(path)
+        if found:
+            resolved.append(found)
+    return resolved
 
 
 def _extract_export_archive(zipfile_name, progress_callback=None):
     log_progress(progress_callback, f"Extracting Letterboxd export archive from '{zipfile_name}'...")
     with zipfile.ZipFile(zipfile_name, 'r') as zip_ref:
         zip_ref.extractall('.')
+
+
+def _find_local_export_zip(zipfile_name='letterboxd_export.zip'):
+    candidates = [
+        zipfile_name,
+        os.path.join("data", zipfile_name),
+    ]
+
+    downloads_dir = Path.home() / "Downloads"
+    if downloads_dir.exists():
+        for pattern in ("letterboxd_export*.zip", "letterboxd-*.zip", "letterboxd*.zip"):
+            candidates.extend(str(path) for path in downloads_dir.glob(pattern))
+
+    existing = [path for path in candidates if os.path.exists(path)]
+    if not existing:
+        return None
+
+    return max(existing, key=os.path.getmtime)
 
 
 def _required_export_paths(task_name):
@@ -80,6 +106,22 @@ def _required_export_paths(task_name):
     return unique_required
 
 
+def _export_fallback_paths(task_name):
+    paths = _required_export_paths(task_name)
+
+    optional_paths = []
+    if task_name == "watchlist" and config.include_watched_not_rated:
+        optional_paths.extend([config.watched_path, config.ratings_path])
+    elif task_name != "rating":
+        optional_paths.extend([config.watchlist_path, config.watched_path, config.ratings_path])
+
+    for path in optional_paths:
+        if path not in paths:
+            paths.append(path)
+
+    return paths
+
+
 def lb_export(task_name=None, progress_callback=None):
     if not config.use_api:
         return
@@ -87,6 +129,7 @@ def lb_export(task_name=None, progress_callback=None):
     zipfile_name = 'letterboxd_export.zip'
     skip_download = False
     required_paths = _required_export_paths(task_name)
+    fallback_paths = _export_fallback_paths(task_name)
 
     if os.path.exists(zipfile_name):
         mtime = os.path.getmtime(zipfile_name)
@@ -99,6 +142,15 @@ def lb_export(task_name=None, progress_callback=None):
         _extract_export_archive(zipfile_name, progress_callback)
         return
 
+    existing_required = _existing_paths(required_paths)
+    if required_paths and len(existing_required) == len(required_paths):
+        log_progress(
+            progress_callback,
+            "Using existing extracted Letterboxd CSV files before attempting login... "
+            f"Found: {', '.join(existing_required)}"
+        )
+        return
+
     try:
         log_progress(progress_callback, "Signing in to Letterboxd...")
         session = Session(config.api_username, config.api_password, config.api_use_2fa_code)
@@ -109,17 +161,31 @@ def lb_export(task_name=None, progress_callback=None):
     except Exception as exc:
         log_progress(progress_callback, f"Letterboxd download blocked, checking local fallback... ({exc})")
 
+    discovered_zip = _find_local_export_zip(zipfile_name)
+    if discovered_zip:
+        log_progress(
+            progress_callback,
+            "Using local Letterboxd export ZIP fallback because live login/download failed. "
+            f"Found: {discovered_zip}"
+        )
+        _extract_export_archive(discovered_zip, progress_callback)
+        return
+
     if os.path.exists(zipfile_name):
         log_progress(progress_callback, "Using existing export ZIP as fallback because live login/download failed.")
         _extract_export_archive(zipfile_name, progress_callback)
         return
 
-    existing_required = _existing_paths(required_paths)
-    if required_paths and len(existing_required) == len(required_paths):
-        log_progress(progress_callback, "Using existing extracted Letterboxd CSV files as fallback because live login/download failed.")
+    existing_fallback = _existing_paths(fallback_paths)
+    if existing_fallback:
+        log_progress(
+            progress_callback,
+            "Using local Letterboxd CSV fallback because live login/download failed. "
+            f"Found: {', '.join(existing_fallback)}"
+        )
         return
 
-    missing_required = [path for path in required_paths if path not in existing_required]
+    missing_required = [path for path in required_paths if util.resolve_existing_path(path) is None]
     if missing_required:
         raise Exception(
             "Letterboxd login/download was blocked by Cloudflare and no usable local export fallback was found. "
@@ -173,16 +239,34 @@ def ignore():
     return jsonify(success=True)
 
 def load_csv_names(path):
+    path = str(path)
     names = set()
-    if not os.path.exists(path):
-        return names
-    with open(path, newline='', encoding='utf-8') as f:
+    row_count = 0
+
+    candidate_paths = [path]
+    if not os.path.isabs(path):
+        candidate_paths.append(os.path.join("lb", os.path.basename(path)))
+
+    existing_path = next((p for p in candidate_paths if os.path.exists(p)), None)
+    if not existing_path:
+        return names, None, row_count
+
+    resolved_path = str(existing_path)
+
+    with open(resolved_path, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            name = row.get("Name", "").strip().lower()
+            row_count += 1
+            name = (
+                row.get("Name")
+                or row.get("name")
+                or row.get("Title")
+                or row.get("title")
+                or ""
+            ).strip().lower()
             if name:
                 names.add(name)
-    return names
+    return names, resolved_path, row_count
 
 
 def _empty_task_state(task_name):
@@ -346,7 +430,8 @@ def action(name):
         "owned",
         "rating",
         "cleanup_missing",
-        "strip_missing_years"
+        "strip_missing_years",
+        "refresh_release_cache"
     ]:
         return jsonify(success=False, message=f"Unknown action '{name}'")
 
@@ -369,24 +454,47 @@ def action(name):
             missing = json.load(f)
 
         known_names = set()
-        known_names |= load_csv_names(config.watchlist_path)
-        known_names |= load_csv_names(config.watched_path)
-        known_names |= load_csv_names(config.ratings_path)
+        csv_sources = [
+            ("watchlist", config.watchlist_path),
+            ("watched", config.watched_path),
+            ("ratings", config.ratings_path),
+        ]
+
+        source_stats = []
+        for source_name, source_path in csv_sources:
+            source_names, used_path, row_count = load_csv_names(source_path)
+            known_names |= source_names
+            source_stats.append({
+                "source": source_name,
+                "configured_path": source_path,
+                "used_path": used_path,
+                "rows": row_count,
+                "unique_names": len(source_names),
+            })
+
+        if not known_names:
+            return jsonify(
+                success=False,
+                message="No CSV movie names found. Cleanup skipped to avoid deleting all missing entries.",
+                details=source_stats,
+            )
 
         original_count = len(missing)
 
         cleaned = []
         for m in missing:
             missing_name = str(m.get("name", "")).strip().lower()
-            if missing_name not in known_names:
+            if missing_name in known_names:
                 cleaned.append(m)
 
         with open(config.missing_path, "w", encoding="utf-8") as f:
             json.dump(cleaned, f, indent=2)
 
+        removed_count = original_count - len(cleaned)
         return jsonify(
             success=True,
-            message=f"Removed {original_count - len(cleaned)} entries from missing list"
+            message=f"Removed {removed_count} stale entries from missing list",
+            details=source_stats,
         )
 
     elif name == "strip_missing_years":
@@ -406,6 +514,49 @@ def action(name):
         return jsonify(
             success=True,
             message=f"Cleaned years from {changed} missing entries"
+        )
+
+    elif name == "refresh_release_cache":
+        with open(config.missing_path, "r", encoding="utf-8") as f:
+            missing = json.load(f)
+
+        refreshed = 0
+        changed = 0
+        unresolved = 0
+
+        for m in missing:
+            lb_name = m.get("name", "")
+            lb_year = m.get("year", "")
+
+            if not lb_name or not lb_year:
+                continue
+
+            try:
+                movie_id = tmdb.get_tmdb_id_for_letterboxd_movie(lb_name, str(lb_year))
+                if not movie_id:
+                    unresolved += 1
+                    continue
+
+                best_overall = tmdb.get_configured_release_date_for_movie(movie_id, refresh=True)
+                refreshed += 1
+
+                previous = m.get("release_date")
+                if best_overall != previous:
+                    m["release_date"] = best_overall
+                    changed += 1
+            except Exception:
+                pass
+
+        with open(config.missing_path, "w", encoding="utf-8") as f:
+            json.dump(missing, f, indent=2)
+
+        return jsonify(
+            success=True,
+            message=(
+                f"Refreshed TMDB release cache for {refreshed} missing entries; "
+                f"updated {changed} release dates in missing list"
+                + (f" ({unresolved} entries without TMDB id skipped)" if unresolved else "")
+            )
         )
 
 @app.route("/stream/<task_name>")
@@ -452,6 +603,87 @@ def stream_task(task_name):
 def task_status():
     return jsonify(_task_status_payload())
 
+
+@app.route("/tmdb/releases/<movie_id>")
+def tmdb_releases(movie_id):
+    try:
+        releases = tmdb.get_release_dates(movie_id)
+        releases = tmdb.get_first_release_per_type(releases)
+        return jsonify({
+            "success": True,
+            "movie_id": movie_id,
+            "count": len(releases),
+            "releases": releases,
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "movie_id": movie_id,
+            "message": str(e),
+        }), 500
+
+
+@app.route("/tmdb/releases/by-missing")
+def tmdb_releases_by_missing():
+    name = request.args.get("name", "")
+    year = request.args.get("year", "")
+
+    if not name or not year:
+        return jsonify({
+            "success": False,
+            "message": "Missing required query parameters: name and year",
+        }), 400
+
+    try:
+        movie_id, releases = tmdb.get_release_dates_for_letterboxd_movie(name, year)
+        releases = tmdb.get_first_release_per_type(releases)
+        return jsonify({
+            "success": True,
+            "name": name,
+            "year": year,
+            "movie_id": movie_id,
+            "count": len(releases),
+            "releases": releases,
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": str(e),
+        }), 500
+
+
+@app.route("/tmdb/releases/by-missing/fetch")
+def tmdb_releases_by_missing_fetch():
+    """
+    Gets release dates for a Letterboxd movie, fetching from TMDB API on-demand if not cached.
+    This endpoint is used by the UI when a modal is opened and no cached releases exist.
+    """
+    name = request.args.get("name", "")
+    year = request.args.get("year", "")
+
+    if not name or not year:
+        return jsonify({
+            "success": False,
+            "message": "Missing required query parameters: name and year",
+        }), 400
+
+    try:
+        movie_id, releases = tmdb.get_release_dates_for_letterboxd_movie_with_fetch(name, year)
+        releases = tmdb.get_first_release_per_type(releases)
+        return jsonify({
+            "success": True,
+            "name": name,
+            "year": year,
+            "movie_id": movie_id,
+            "count": len(releases),
+            "releases": releases,
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": str(e),
+        }), 500
+
 @app.route("/config", methods=["GET"])
 def config_page():
     # return HTML page
@@ -464,19 +696,24 @@ def config_data():
             cfg = json.load(f)
     else:
         cfg = {}
-        for key in dir(config):
-            if key.startswith("_") or not key.islower():
-                continue
-            value = getattr(config, key)
 
-            if isinstance(value, type(config)):
-                continue
+    # Always merge in any new keys from config.py that aren't in the file yet
+    for key in dir(config):
+        if key.startswith("_") or not key.islower():
+            continue
+        if key in cfg:
+            continue
 
-            # convert enums to string
-            if isinstance(value, Enum):
-                value = str(value)
+        value = getattr(config, key)
 
-            cfg[key] = value
+        if isinstance(value, type(config)):
+            continue
+
+        # convert enums to string
+        if isinstance(value, Enum):
+            value = str(value)
+
+        cfg[key] = value
     return jsonify(cfg)
 
 @app.route("/config/save", methods=["POST"])
@@ -489,6 +726,14 @@ def config_save():
             json.dump(cfg, f, indent=4)
 
         for key, value in cfg.items():
+            current_value = getattr(config, key, None)
+
+            if isinstance(current_value, Enum) and isinstance(value, str):
+                enum_class = type(current_value)
+                enum_name = value.split(".")[-1] if "." in value else value
+                if enum_name in enum_class.__members__:
+                    value = enum_class[enum_name]
+
             setattr(config, key, value)
 
         connected = False
@@ -605,10 +850,10 @@ def main():
 
     os.makedirs("data", exist_ok=True)
     os.makedirs("config", exist_ok=True)
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[logging.FileHandler('ltp.log', encoding='utf-8')]
         handlers=[logging.FileHandler(os.path.join("data", "ltp.log"), encoding='utf-8')]
     )
 
@@ -627,8 +872,6 @@ def main():
     logger = logging.getLogger('')
     logger.setLevel(level=logging.INFO)
 
-    if not os.path.exists("data"): os.mkdir("data")
-    if not os.path.exists("config"): os.mkdir("config")
 
     try:
         plex = PlexServer(config.baseurl, config.token)

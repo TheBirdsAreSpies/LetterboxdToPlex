@@ -50,23 +50,34 @@ db_path = "data/ltp.db"
 
 web_mode = False
 
-if os.path.exists(config_path):
+
+def _load_config_overrides():
+    if not os.path.exists(config_path):
+        return
+
     try:
         with open(config_path, encoding="utf-8") as f:
             cfg = json.load(f)
 
         for key, value in cfg.items():
-            if key in globals():
-                current_value = globals()[key]
+            if key not in globals():
+                continue
 
-                if isinstance(current_value, Enum) and isinstance(value, str) and '.' in value:
-                    enum_class = type(current_value)
-                    enum_name = value.split('.')[-1]
-                    value = enum_class[enum_name]
+            current_value = globals()[key]
 
-                globals()[key] = value
+            if isinstance(current_value, Enum) and isinstance(value, str) and '.' in value:
+                current_enum_class = type(current_value)
+                current_enum_name = value.split('.')[-1]
+                value = current_enum_class[current_enum_name]
+
+            globals()[key] = value
 
     except json.JSONDecodeError:
         print(f"Warning: {config_path} is invalid JSON. Using defaults.")
     except Exception as e:
         print(f"Warning: Failed to load {config_path}: {e}")
+
+
+_load_config_overrides()
+
+

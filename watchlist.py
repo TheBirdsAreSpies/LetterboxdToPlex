@@ -16,6 +16,13 @@ from movie import Movie
 from tqdm import tqdm
 
 
+def _refresh_release_date_for_missing(tmdb_id):
+    try:
+        return tmdb.get_configured_release_date_for_movie(tmdb_id, refresh=True)
+    except Exception:
+        return None
+
+
 def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
     current_year = datetime.datetime.now().year
     to_ignore = IgnoreMovie.load_json() or []
@@ -74,7 +81,7 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
                     tmdb_movies = tmdb.search_movie(title=name)
                     if len(tmdb_movies) == 0:
                         logger.debug(f'Movie {combination.name} ({combination.year}) not found on TMDB, added to missing list')
-                        combination.release_date = tmdb.release_date(tmdb_id)
+                        combination.release_date = _refresh_release_date_for_missing(tmdb_id)
                         missing.append(combination)
                         continue
 
@@ -179,13 +186,12 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
                     logger.info(f'Movie {name} ({year}) is missing')
                     for existing in missing:
                         if combination.name == existing.name and combination.year == existing.year:
-                            if existing.release_date is None:
-                                logger.debug(f'Updating release_date for movie {existing.name} ({existing.year})')
-                                existing.release_date = tmdb.release_date(tmdb_id)
+                            logger.debug(f'Refreshing release_date for movie {existing.name} ({existing.year})')
+                            existing.release_date = _refresh_release_date_for_missing(tmdb_id)
                             break
                     else:
                         logger.debug(f'Movie {combination.name} ({combination.year}) added to missing list')
-                        combination.release_date = tmdb.release_date(tmdb_id)
+                        combination.release_date = _refresh_release_date_for_missing(tmdb_id)
                         missing.append(combination)
             else:  # old way
                 result = movies.search(title=name, year=years)
@@ -297,7 +303,11 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
 def __read_watchlist_csv__(file_path):
     data = []
 
-    with open(file_path, 'r', newline='', encoding='utf-8') as file:
+    resolved_path = util.resolve_existing_path(file_path)
+    if not resolved_path:
+        return data
+
+    with open(resolved_path, 'r', newline='', encoding='utf-8') as file:
         reader = csv.reader(file)
         next(reader)  # skip header
         for row in reader:

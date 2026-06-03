@@ -117,6 +117,14 @@ class MovieDetails:
         self.vote_count = data.get("vote_count")
 
 
+def __release_type_name(value):
+    normalized = __normalize_release_type_value(value)
+    for release_type in ReleaseType:
+        if str(release_type.value) == normalized:
+            return release_type.name
+    return str(value)
+
+
 def __normalize_release_type_value(value):
     if isinstance(value, ReleaseType):
         return str(value.value)
@@ -138,6 +146,243 @@ def __normalize_release_type_value(value):
         return candidate
 
     return str(value)
+
+
+def __parse_release_datetime(value):
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def __ensure_tmdb_releases_schema(cursor):
+    cursor.execute("PRAGMA table_info(tmdb_releases)")
+    columns = {row[1] for row in cursor.fetchall()}
+
+    if "iso_3166_1" not in columns:
+        cursor.execute("ALTER TABLE tmdb_releases ADD COLUMN iso_3166_1 TEXT NOT NULL DEFAULT ''")
+
+    if "release_type_name" not in columns:
+        cursor.execute("ALTER TABLE tmdb_releases ADD COLUMN release_type_name TEXT NOT NULL DEFAULT ''")
+
+
+def __store_release_dates(movie_id: str, movie_release_info: MovieReleaseInfo):
+    connection = sqlite3.connect(config.db_path)
+    cursor = connection.cursor()
+
+    # Keep a single authoritative snapshot per TMDB id.
+    cursor.execute('DELETE FROM tmdb_releases WHERE tmdb_id = ?', (movie_id,))
+
+    insert_query = ('INSERT INTO tmdb_releases '
+                    '(title, iso_3166_1, release_id, release_type_name, release_date, tmdb_id) '
+                    'VALUES (?, ?, ?, ?, ?, ?)')
+
+    for country in movie_release_info.results:
+        for rd in country.release_dates:
+            cursor.execute(insert_query, (
+                movie_id,
+                country.iso_3166_1,
+                int(rd.type),
+                __release_type_name(rd.type),
+                str(rd.release_date),
+                movie_id,
+            ))
+
+    connection.commit()
+    cursor.close()
+    connection.close()
+
+
+def get_release_dates(movie_id: str):
+    connection = sqlite3.connect(config.db_path)
+    cursor = connection.cursor()
+
+    select_query = ('SELECT iso_3166_1, release_id, release_type_name, release_date '
+                    'FROM tmdb_releases WHERE tmdb_id = ? ORDER BY release_date ASC')
+    cursor.execute(select_query, (movie_id,))
+    rows = cursor.fetchall()
+
+    cursor.close()
+    connection.close()
+
+    return [
+        {
+            "country_code": row[0],
+            "release_type_id": row[1],
+            "release_type": row[2],
+            "release_date": row[3],
+        }
+        for row in rows
+    ]
+
+
+def get_release_dates_for_letterboxd_movie(lb_title: str, lb_year: str):
+    connection = sqlite3.connect(config.db_path)
+    cursor = connection.cursor()
+
+    cursor.execute('SELECT tmdb_id FROM tmdb_cache WHERE lb_title = ? AND lb_year = ? LIMIT 1', (lb_title, str(lb_year)))
+    row = cursor.fetchone()
+
+    cursor.close()
+    connection.close()
+
+    if not row or not row[0]:
+        return None, []
+
+    movie_id = str(row[0])
+    return movie_id, get_release_dates(movie_id)
+
+
+def get_release_dates_for_letterboxd_movie_with_fetch(lb_title: str, lb_year: str):
+    """
+    Gets release dates for a Letterboxd movie. If no cached releases exist,
+    fetches them from TMDB API on-demand.
+
+    Returns: (movie_id, releases_list) tuple
+    """
+    # First try to get cached releases
+    movie_id, releases = get_release_dates_for_letterboxd_movie(lb_title, lb_year)
+
+    if releases:
+        # Already have cached releases
+        return movie_id, releases
+
+    if not movie_id:
+        # No TMDB ID found, nothing to fetch
+        return None, []
+
+    # Fetch release dates from API and store them
+    release_date(movie_id)
+
+    # Now get the freshly fetched and stored releases
+    return movie_id, get_release_dates(movie_id)
+
+
+def get_tmdb_id_for_letterboxd_movie(lb_title: str, lb_year: str):
+    connection = sqlite3.connect(config.db_path)
+    cursor = connection.cursor()
+
+    cursor.execute('SELECT tmdb_id FROM tmdb_cache WHERE lb_title = ? AND lb_year = ? LIMIT 1', (lb_title, str(lb_year)))
+    row = cursor.fetchone()
+
+    cursor.close()
+    connection.close()
+
+    if not row or not row[0]:
+        return None
+
+    movie_id = str(row[0]).strip()
+    if not movie_id or movie_id in {"-1", "None", "null"}:
+        return None
+    return movie_id
+
+
+def get_configured_release_date_for_movie(movie_id: str, refresh: bool = False):
+    if not movie_id:
+        return None
+
+    movie_id = str(movie_id).strip()
+    if not movie_id or movie_id in {"-1", "None", "null"}:
+        return None
+
+    if refresh:
+        release_date(movie_id)
+
+    releases = get_release_dates(movie_id)
+    if not releases:
+        release_date(movie_id)
+        releases = get_release_dates(movie_id)
+
+    return get_configured_release_date(releases)
+
+
+def get_configured_release_date(releases_list):
+    """Return the earliest release date matching configured country + type."""
+    if not releases_list:
+        return None
+
+    country_code = str(getattr(config, "tmdb_release_country_code", "")).strip().upper()
+    release_type_value = __normalize_release_type_value(getattr(config, "tmdb_release_type", ""))
+
+    candidates = []
+    for rel in releases_list:
+        rel_country = str(rel.get("country_code", "")).strip().upper()
+        rel_type = __normalize_release_type_value(rel.get("release_type_id", rel.get("release_type", "")))
+        rel_date = rel.get("release_date")
+        parsed_date = __parse_release_datetime(rel_date)
+
+        if parsed_date is None:
+            continue
+        if country_code and rel_country != country_code:
+            continue
+        if release_type_value and rel_type != release_type_value:
+            continue
+
+        candidates.append((parsed_date, str(rel_date)))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
+def get_first_release_per_type(releases_list):
+    """Return one earliest entry per release type."""
+    if not releases_list:
+        return []
+
+    best_by_type = {}
+
+    for rel in releases_list:
+        rel_date = rel.get("release_date")
+        parsed_date = __parse_release_datetime(rel_date)
+        if parsed_date is None:
+            continue
+
+        rel_type_raw = rel.get("release_type_id", rel.get("release_type", ""))
+        rel_type_normalized = __normalize_release_type_value(rel_type_raw)
+        rel_type_key = rel_type_normalized or str(rel.get("release_type", ""))
+        if not rel_type_key:
+            continue
+        existing = best_by_type.get(rel_type_key)
+
+        if existing is None:
+            best_by_type[rel_type_key] = (parsed_date, rel)
+            continue
+
+        existing_date, _ = existing
+        if parsed_date < existing_date:
+            best_by_type[rel_type_key] = (parsed_date, rel)
+
+    reduced = [entry[1] for entry in best_by_type.values()]
+
+    def _sort_key(entry):
+        normalized = __normalize_release_type_value(entry.get("release_type_id", entry.get("release_type", "")))
+        if normalized.isdigit():
+            return 0, int(normalized)
+        return 1, str(entry.get("release_type", ""))
+
+    return sorted(reduced, key=_sort_key)
+
+
+def release_date(movie_id: str):
+    url = f"https://api.themoviedb.org/3/movie/{movie_id}/release_dates"
+    headers = __get_headers()
+    response = requests.get(url, headers=headers)
+
+    if response.status_code != 200:
+        return None
+
+    data = json.loads(response.text)
+    movie_release_info = MovieReleaseInfo(data)
+    __store_release_dates(movie_id, movie_release_info)
+
+    releases = get_release_dates(movie_id)
+    return get_configured_release_date(releases)
 
 
 def __get_headers():
@@ -181,7 +426,9 @@ def create_table():
     CREATE TABLE IF NOT EXISTS tmdb_releases (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
+        iso_3166_1 TEXT NOT NULL DEFAULT '',
         release_id INTEGER NOT NULL,
+        release_type_name TEXT NOT NULL DEFAULT '',
         release_date DATE NOT NULL,
         tmdb_id TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -189,6 +436,11 @@ def create_table():
     '''
     cursor = connection.cursor()
     cursor.execute(create_table_query)
+
+    __ensure_tmdb_releases_schema(cursor)
+
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tmdb_releases_tmdb_id ON tmdb_releases (tmdb_id);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tmdb_releases_country_type ON tmdb_releases (iso_3166_1, release_id);')
 
     connection.commit()
     connection.close()
@@ -281,13 +533,25 @@ def invalidate_cache():
     if not config.tmdb_invalidate_cache:
         return
 
+    try:
+        days = int(config.tmdb_invalidate_cache_days)
+    except Exception:
+        days = 30
+
+    if days < 0:
+        days = 0
+
     connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
 
-    cursor.execute(f"""
-                    DELETE FROM tmdb_cache
-                    WHERE created_at < DATE('now', '-{config.tmdb_invalidate_cache_days} days');
-                    """)
+    cursor.execute(
+        "DELETE FROM tmdb_cache WHERE created_at < DATETIME('now', ?)",
+        (f"-{days} days",),
+    )
+    cursor.execute(
+        "DELETE FROM tmdb_releases WHERE created_at < DATETIME('now', ?)",
+        (f"-{days} days",),
+    )
     connection.commit()
 
     cursor.close()
@@ -327,31 +591,6 @@ def search_movie(title: str, year: int = None):
     return movies.results
 
 
-def release_date(movie_id: str):
-    url = f"https://api.themoviedb.org/3/movie/{movie_id}/release_dates"
-    headers = __get_headers()
-    response = requests.get(url, headers=headers)
-
-    if response.status_code != 200:
-        return None
-
-    data = json.loads(response.text)
-    movie_release_info = MovieReleaseInfo(data)
-
-    release_type_value = __normalize_release_type_value(config.tmdb_release_type)
-
-    filtered_release = [
-        rd
-        for country in movie_release_info.results
-        if country.iso_3166_1 == config.tmdb_release_country_code
-        for rd in country.release_dates
-        if __normalize_release_type_value(rd.type) == release_type_value
-    ]
-
-    if len(filtered_release) > 0:
-        return str(filtered_release[0].release_date)
-    else:
-        return None
 
 
 def __get_movie_details(movie_id: str):

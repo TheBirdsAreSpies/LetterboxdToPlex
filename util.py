@@ -1,10 +1,41 @@
 import csv
+import os
+
+
+def resolve_existing_path(file_path):
+    if not file_path:
+        return None
+
+    path = str(file_path)
+    candidates = [path]
+
+    if not os.path.isabs(path):
+        basename = os.path.basename(path)
+        candidates.extend([
+            basename,
+            os.path.join("data", basename),
+            os.path.join("lb", basename),
+        ])
+
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.exists(candidate):
+            return candidate
+
+    return None
 
 
 def read_general_csv(file_path):
     data = []
 
-    with open(file_path, 'r', newline='', encoding='utf-8') as file:
+    resolved_path = resolve_existing_path(file_path)
+    if not resolved_path:
+        return data
+
+    with open(resolved_path, 'r', newline='', encoding='utf-8') as file:
         reader = csv.DictReader(file)
         for row in reader:
             data.append(row)

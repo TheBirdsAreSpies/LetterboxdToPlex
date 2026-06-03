@@ -27,6 +27,13 @@
         .autoselection-row .title { margin-right:0.5rem; font-weight:600; }
 
         .table-wrap { width:100%; overflow-x:auto; }
+        .release-btn { background: #2d6cdf; }
+        .release-btn:hover { background: #1f4fa3; }
+        .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: none; align-items: center; justify-content: center; z-index: 1000; }
+        .modal { width: min(900px, 95vw); max-height: 85vh; overflow: auto; background: #fff; border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,0.25); padding: 1rem; }
+        .modal-header { display:flex; justify-content:space-between; align-items:center; gap:0.5rem; }
+        .modal-header h3 { margin: 0; }
+        .modal-meta { margin: 0.5rem 0 1rem; color: #555; }
 
         @media (max-width: 600px) {
             body { margin: 0.6rem; }
@@ -51,6 +58,7 @@
             <button onclick="runAction('owned')">Create Owned List</button>
             <button onclick="runAction('rating')">Update Ratings</button>
             <button onclick="runAction('cleanup_missing')">Check Entries</button>
+            <button onclick="runAction('refresh_release_cache')">Refresh Release Cache</button>
             <button onclick="runAction('strip_missing_years')">Clear Release Dates</button>
         </div>
         <div>
@@ -71,6 +79,7 @@
             <th onclick="sortTable(0)">Title ▲▼</th>
             <th onclick="sortTable(1)">Year ▲▼</th>
             <th onclick="sortTable(2)">Release Date ▲▼</th>
+            <th>TMDB Releases</th>
             <th>Actions</th>
         </tr>
         {% for item in missing %}
@@ -84,6 +93,9 @@
                     -
                 {% endif %}
             </td>
+            <td>
+                <button class="release-btn" onclick='showReleaseDetails({{ item.name|tojson }}, {{ item.year|tojson }}, {{ (item.release_date or "")|tojson }})'>Show</button>
+            </td>
             <td><button class="danger" onclick="ignoreItem('{{ item.name }}')">Ignore Movie</button></td>
         </tr>
         {% endfor %}
@@ -92,6 +104,29 @@
     {% else %}
     <p>No missing movies</p>
     {% endif %}
+
+    <div id="releaseModalBackdrop" class="modal-backdrop" onclick="closeReleaseModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="releaseModalTitle">TMDB Releases</h3>
+                <button onclick="closeReleaseModal()">Close</button>
+            </div>
+            <div id="releaseModalMeta" class="modal-meta"></div>
+            <div class="table-wrap">
+                <table id="releaseDetailsTable" class="two-tone">
+                    <thead>
+                        <tr>
+                            <th>Country</th>
+                            <th>Type</th>
+                            <th>Type ID</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
     <script>
     async function runAction(name) {
@@ -163,6 +198,59 @@
             body: JSON.stringify({ name })
         });
         if (res.ok) location.reload();
+    }
+
+    function closeReleaseModal(event) {
+        if (event && event.target && event.target.id !== 'releaseModalBackdrop') return;
+        const backdrop = document.getElementById('releaseModalBackdrop');
+        backdrop.style.display = 'none';
+    }
+
+    async function showReleaseDetails(name, year, configuredReleaseDate) {
+        const backdrop = document.getElementById('releaseModalBackdrop');
+        const title = document.getElementById('releaseModalTitle');
+        const meta = document.getElementById('releaseModalMeta');
+        const tbody = document.querySelector('#releaseDetailsTable tbody');
+
+        title.innerText = `${name} (${year})`;
+        meta.innerText = `Configured Release Date: ${configuredReleaseDate ? configuredReleaseDate.split('T')[0].split(' ')[0] : '-'}`;
+        tbody.innerHTML = '<tr><td colspan="4">Loading...</td></tr>';
+        backdrop.style.display = 'flex';
+
+        try {
+            const params = new URLSearchParams({ name, year: String(year) });
+            let res = await fetch(`/tmdb/releases/by-missing?${params.toString()}`);
+            let data = await res.json();
+
+            // If no cached releases found, try fetching on-demand
+            if (res.ok && data.success && (!data.releases || data.releases.length === 0) && data.movie_id) {
+                tbody.innerHTML = '<tr><td colspan="4">Fetching from TMDB API...</td></tr>';
+                res = await fetch(`/tmdb/releases/by-missing/fetch?${params.toString()}`);
+                data = await res.json();
+            }
+
+            if (!res.ok || !data.success) {
+                tbody.innerHTML = `<tr><td colspan="4">Error: ${(data && data.message) ? data.message : 'Unknown error'}</td></tr>`;
+                return;
+            }
+
+            const movieIdText = data.movie_id ? `TMDB ID: ${data.movie_id}` : 'TMDB ID not cached for this entry yet';
+            meta.innerText = `Configured Release Date: ${configuredReleaseDate ? configuredReleaseDate.split('T')[0].split(' ')[0] : '-'} | ${movieIdText}`;
+
+            if (!data.releases || data.releases.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4">No TMDB release dates found.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.releases.map(r => {
+                const formattedDate = String(r.release_date || '').split('T')[0].split(' ')[0] || '-';
+                return `<tr><td>${r.country_code || '-'}</td><td>${r.release_type || '-'}</td><td>${r.release_type_id || '-'}</td><td>${formattedDate}</td></tr>`;
+            }).join('');
+
+            updateRowStriping(document.getElementById('releaseDetailsTable'));
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="4">Error: ${err}</td></tr>`;
+        }
     }
 
     function sortTable(colIndex) {
