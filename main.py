@@ -142,15 +142,6 @@ def lb_export(task_name=None, progress_callback=None):
         _extract_export_archive(zipfile_name, progress_callback)
         return
 
-    existing_required = _existing_paths(required_paths)
-    if required_paths and len(existing_required) == len(required_paths):
-        log_progress(
-            progress_callback,
-            "Using existing extracted Letterboxd CSV files before attempting login... "
-            f"Found: {', '.join(existing_required)}"
-        )
-        return
-
     try:
         log_progress(progress_callback, "Signing in to Letterboxd...")
         session = Session(config.api_username, config.api_password, config.api_use_2fa_code)
