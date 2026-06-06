@@ -129,6 +129,35 @@
     </div>
 
     <script>
+    const STREAM_TASKS = new Set(['watchlist', 'rating']);
+
+    function attachTaskStream(taskName, status, reconnect = false) {
+        const eventSource = new EventSource('/stream/' + taskName);
+        const MAX_LINES = 50;
+        let logLines = reconnect ? ['Reconnected to running ' + taskName + ' task...'] : [];
+
+        status.innerHTML = reconnect ? logLines.join('<br>') : '';
+
+        eventSource.onmessage = function (event) {
+            logLines.push(event.data);
+            if (logLines.length > MAX_LINES) {
+                logLines = logLines.slice(logLines.length - MAX_LINES);
+            }
+            status.innerHTML = logLines.join('<br>');
+            status.scrollTop = status.scrollHeight;
+        };
+
+        eventSource.onerror = function () {
+            eventSource.close();
+            logLines.push('Stream ended or error occurred');
+            if (logLines.length > MAX_LINES) {
+                logLines = logLines.slice(logLines.length - MAX_LINES);
+            }
+            status.innerHTML = logLines.join('<br>');
+            status.scrollTop = status.scrollHeight;
+        };
+    }
+
     async function runAction(name) {
         const status = document.getElementById('status');
         status.style.display = 'block';
@@ -154,35 +183,11 @@
                 const data = await res.json();
                 status.innerText = data.message;
                 status.style.background = '#e6ffe6';
-            }
 
-            const MAX_LINES = 50;
-            let logLines = [];
-            if (name === "watchlist") {
-                await fetch('/action/watchlist', { method: 'POST' });
-
-                const eventSource = new EventSource('/stream/watchlist');
-                status.innerHTML = "";
-
-                eventSource.onmessage = function (event) {
-                    // Keep only the last MAX_LINES
-                    logLines.push(event.data);
-                    if (logLines.length > MAX_LINES) {
-                        logLines = logLines.slice(logLines.length - MAX_LINES);
-                    }
-                    status.innerHTML = logLines.join('<br>');
-                    status.scrollTop = status.scrollHeight; // auto scroll
-                };
-
-                eventSource.onerror = function () {
-                    eventSource.close();
-                    logLines.push("Stream ended or error occurred");
-                    if (logLines.length > MAX_LINES) {
-                        logLines = logLines.slice(logLines.length - MAX_LINES);
-                    }
-                    status.innerHTML = logLines.join('<br>');
-                    status.scrollTop = status.scrollHeight;
-                };
+                if (STREAM_TASKS.has(name) && data.success) {
+                    status.style.background = '#eef';
+                    attachTaskStream(name, status);
+                }
             }
         } catch (err) {
             status.innerText = 'Error: ' + err;
@@ -412,34 +417,12 @@
                 const res = await fetch('/task/status');
                 const data = await res.json();
 
-                if (data.running && data.task_name === 'watchlist') {
+                if (data.running && data.task_name && STREAM_TASKS.has(data.task_name)) {
                     const status = document.getElementById('status');
                     status.style.display = 'block';
                     status.style.background = '#eef';
-                    status.innerHTML = 'Reconnecting to running watchlist task...<br>';
-
-                    const eventSource = new EventSource('/stream/watchlist');
-                    let logLines = ['Reconnected to running task...'];
-                    const MAX_LINES = 50;
-
-                    eventSource.onmessage = function (event) {
-                        logLines.push(event.data);
-                        if (logLines.length > MAX_LINES) {
-                            logLines = logLines.slice(logLines.length - MAX_LINES);
-                        }
-                        status.innerHTML = logLines.join('<br>');
-                        status.scrollTop = status.scrollHeight;
-                    };
-
-                    eventSource.onerror = function () {
-                        eventSource.close();
-                        logLines.push("Stream ended or error occurred");
-                        if (logLines.length > MAX_LINES) {
-                            logLines = logLines.slice(logLines.length - MAX_LINES);
-                        }
-                        status.innerHTML = logLines.join('<br>');
-                        status.scrollTop = status.scrollHeight;
-                    };
+                    status.innerHTML = 'Reconnecting to running ' + data.task_name + ' task...<br>';
+                    attachTaskStream(data.task_name, status, true);
                 }
             } catch (err) {
                 console.error('Error checking task status:', err);

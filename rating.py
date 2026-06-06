@@ -40,10 +40,15 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
     cursor.execute(create_table_query)
     connection.commit()
 
+    def publish_progress(message: str):
+        logger.info(message)
+        if progress_callback:
+            progress_callback(message)
+
     with tqdm(total=len(data), unit='Movies') as pbar:
         for name, year, stars, uri in data:
             pbar.set_description(f'Processing {name} ({year})'.ljust(80, ' '))
-            progress_callback(f'Processing {name} ({year})')
+            publish_progress(f'Processing {name} ({year})')
 
             was_missing_names = []
             combination = Movie(name, year)
@@ -279,7 +284,8 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
         MissingMovie.store_json(missing)
         autoselection.AutoSelection.store_json(autoselector)
         logger.info('All ratings imported.')
-        progress_callback(f'All ratings imported')
+        if progress_callback:
+            progress_callback('All ratings imported')
 
 
 def _read_ratings_csv_():
