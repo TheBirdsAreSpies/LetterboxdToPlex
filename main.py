@@ -6,7 +6,6 @@ import queue
 import threading
 import time
 import inspect
-from pathlib import Path
 
 from flask import Flask, jsonify, request, Response, render_template
 from enum import Enum
@@ -18,9 +17,10 @@ import owned
 import rating
 import tmdb
 import watchlist
-import util
 import zipfile
+import shutil
 import selector
+import util
 
 from session import Session
 from plexapi.myplex import PlexServer
@@ -54,72 +54,51 @@ def log_progress(progress_callback, message):
         progress_callback(str(message))
 
 
-def _existing_paths(paths):
-    resolved = []
-    for path in paths:
-        found = util.resolve_existing_path(path)
-        if found:
-            resolved.append(found)
-    return resolved
+def _required_export_files_for_task(task_name):
+    files = []
+
+    if task_name == "rating":
+        files.append(config.ratings_path)
+    elif task_name == "watchlist":
+        files.append(config.watchlist_path)
+        if config.include_watched_not_rated:
+            files.extend([config.watched_path, config.ratings_path])
+
+    unique_files = []
+    seen = set()
+    for path in files:
+        path = str(path)
+        if path in seen:
+            continue
+        seen.add(path)
+        unique_files.append(path)
+
+    return unique_files
 
 
-def _extract_export_archive(zipfile_name, progress_callback=None):
+def _extract_export_archive(zipfile_name, progress_callback=None, required_files=None):
     log_progress(progress_callback, f"Extracting Letterboxd export archive from '{zipfile_name}'...")
     with zipfile.ZipFile(zipfile_name, 'r') as zip_ref:
+        members = zip_ref.namelist()
         zip_ref.extractall('.')
 
+        if not required_files:
+            return
 
-def _find_local_export_zip(zipfile_name='letterboxd_export.zip'):
-    candidates = [
-        zipfile_name,
-        os.path.join("data", zipfile_name),
-    ]
+        for required_path in required_files:
+            if util.resolve_existing_path(required_path):
+                continue
 
-    downloads_dir = Path.home() / "Downloads"
-    if downloads_dir.exists():
-        for pattern in ("letterboxd_export*.zip", "letterboxd-*.zip", "letterboxd*.zip"):
-            candidates.extend(str(path) for path in downloads_dir.glob(pattern))
+            required_basename = os.path.basename(str(required_path))
+            required_basename_lower = required_basename.lower()
+            matched_member = next((m for m in members if os.path.basename(m).lower() == required_basename_lower), None)
+            if not matched_member:
+                continue
 
-    existing = [path for path in candidates if os.path.exists(path)]
-    if not existing:
-        return None
+            with zip_ref.open(matched_member) as src, open(required_basename, 'wb') as dst:
+                shutil.copyfileobj(src, dst)
 
-    return max(existing, key=os.path.getmtime)
-
-
-def _required_export_paths(task_name):
-    required = []
-
-    if task_name == "watchlist":
-        required.append(config.watchlist_path)
-        if config.include_watched_not_rated:
-            required.extend([config.watched_path, config.ratings_path])
-    elif task_name == "rating":
-        required.append(config.ratings_path)
-
-    seen = set()
-    unique_required = []
-    for path in required:
-        if path not in seen:
-            unique_required.append(path)
-            seen.add(path)
-    return unique_required
-
-
-def _export_fallback_paths(task_name):
-    paths = _required_export_paths(task_name)
-
-    optional_paths = []
-    if task_name == "watchlist" and config.include_watched_not_rated:
-        optional_paths.extend([config.watched_path, config.ratings_path])
-    elif task_name != "rating":
-        optional_paths.extend([config.watchlist_path, config.watched_path, config.ratings_path])
-
-    for path in optional_paths:
-        if path not in paths:
-            paths.append(path)
-
-    return paths
+            log_progress(progress_callback, f"Recovered missing export file '{required_basename}' from nested ZIP path")
 
 
 def lb_export(task_name=None, progress_callback=None):
@@ -127,65 +106,26 @@ def lb_export(task_name=None, progress_callback=None):
         return
 
     zipfile_name = 'letterboxd_export.zip'
-    skip_download = False
-    required_paths = _required_export_paths(task_name)
-    fallback_paths = _export_fallback_paths(task_name)
-
-    if os.path.exists(zipfile_name):
-        mtime = os.path.getmtime(zipfile_name)
-        age_seconds = time.time() - mtime
-        if age_seconds < 5 * 60:
-            skip_download = True
-
-    if skip_download:
-        log_progress(progress_callback, "Using recent Letterboxd export from disk...")
-        _extract_export_archive(zipfile_name, progress_callback)
-        return
+    required_files = _required_export_files_for_task(task_name)
 
     try:
         log_progress(progress_callback, "Signing in to Letterboxd...")
         session = Session(config.api_username, config.api_password, config.api_use_2fa_code)
         log_progress(progress_callback, "Downloading latest Letterboxd export...")
         session.download_export_data(zipfile_name)
-        _extract_export_archive(zipfile_name, progress_callback)
+        _extract_export_archive(zipfile_name, progress_callback, required_files=required_files)
+
+        missing_files = [path for path in required_files if not util.resolve_existing_path(path)]
+        if missing_files:
+            raise Exception("Downloaded export is missing required CSV(s): " + ", ".join(missing_files))
+
         return
     except Exception as exc:
-        log_progress(progress_callback, f"Letterboxd download blocked, checking local fallback... ({exc})")
-
-    discovered_zip = _find_local_export_zip(zipfile_name)
-    if discovered_zip:
-        log_progress(
-            progress_callback,
-            "Using local Letterboxd export ZIP fallback because live login/download failed. "
-            f"Found: {discovered_zip}"
-        )
-        _extract_export_archive(discovered_zip, progress_callback)
-        return
-
-    if os.path.exists(zipfile_name):
-        log_progress(progress_callback, "Using existing export ZIP as fallback because live login/download failed.")
-        _extract_export_archive(zipfile_name, progress_callback)
-        return
-
-    existing_fallback = _existing_paths(fallback_paths)
-    if existing_fallback:
-        log_progress(
-            progress_callback,
-            "Using local Letterboxd CSV fallback because live login/download failed. "
-            f"Found: {', '.join(existing_fallback)}"
-        )
-        return
-
-    missing_required = [path for path in required_paths if util.resolve_existing_path(path) is None]
-    if missing_required:
         raise Exception(
-            "Letterboxd login/download was blocked by Cloudflare and no usable local export fallback was found. "
-            f"Missing files: {', '.join(missing_required)}"
+            "Live Letterboxd login/download failed. No local CSV/ZIP fallback is used anymore; "
+            "fresh export download is required for every run. "
+            f"Original error: {exc}"
         )
-
-    raise Exception(
-        "Letterboxd login/download was blocked by Cloudflare and no usable local export fallback was found."
-    )
 
 
 def run_watchlist(logger, progress_callback=None):

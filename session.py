@@ -92,12 +92,15 @@ class Session:
 
     @classmethod
     def _retry_delay_seconds(cls, attempt, retry_after_seconds=None):
-        if retry_after_seconds is not None and retry_after_seconds > 0:
-            return min(retry_after_seconds, cls.MAX_RETRY_SECONDS)
+        base = cls.BASE_RETRY_SECONDS * (2 ** (attempt - 1))
 
-        base = min(cls.BASE_RETRY_SECONDS * (2 ** (attempt - 1)), cls.MAX_RETRY_SECONDS)
+        if retry_after_seconds is not None and retry_after_seconds > 0:
+            delay = retry_after_seconds * (2 ** (attempt - 1))
+            return max(delay, base)
+
+        delay = min(base, cls.MAX_RETRY_SECONDS)
         jitter = random.uniform(0, 0.5)
-        return base + jitter
+        return delay + jitter
 
     def _create_session(self):
         session = curl_requests.Session()

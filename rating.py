@@ -209,6 +209,9 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
                         logger.debug(f'Movie {name} ({year}) added to missing list')
                         missing.append(combination)
 
+                    pbar.update(1)
+                    continue
+
             else:  # old way
                 years = [year, str(int(year) - 1), str(int(year) + 1)]
                 result = movies.search(title=name, year=years)
@@ -251,6 +254,14 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
                             autoselection.AutoSelection.store_json(autoselector)
                             was_missing_names.append(res.title)
                             missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+                        else:
+                            logger.info(f'Invalid selection for {name} ({year})')
+                            is_present = any(
+                                combination.name == existing.name and combination.year == existing.year for existing in missing)
+                            if not is_present:
+                                missing.append(combination)
+                            pbar.update(1)
+                            continue
 
                 else:
                     is_present = any(
@@ -292,7 +303,11 @@ def _read_ratings_csv_():
     file_path = config.ratings_path
     data = []
 
-    with open(file_path, 'r', newline='', encoding='utf-8') as file:
+    resolved_path = util.resolve_existing_path(file_path)
+    if not resolved_path:
+        raise FileNotFoundError(f"Ratings CSV not found: {file_path}")
+
+    with open(resolved_path, 'r', newline='', encoding='utf-8') as file:
         reader = csv.reader(file)
         next(reader)  # skip header
         for row in reader:
