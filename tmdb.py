@@ -8,6 +8,8 @@ import sqlite3
 from enum import Enum
 from datetime import datetime
 
+REQUEST_TIMEOUT_SECONDS = 30
+
 
 class ReleaseType(Enum):
     PREMIERE = 1
@@ -372,7 +374,7 @@ def get_first_release_per_type(releases_list):
 def release_date(movie_id: str):
     url = f"https://api.themoviedb.org/3/movie/{movie_id}/release_dates"
     headers = __get_headers()
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
 
     if response.status_code != 200:
         return None
@@ -562,7 +564,7 @@ def auth():
     url = "https://api.themoviedb.org/3/authentication"
     headers = __get_headers()
 
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
     return "Success." in response.text
 
 
@@ -580,7 +582,7 @@ def search_movie(title: str, year: int = None):
         url = (f'https://api.themoviedb.org/3/search/movie?query={compiled_title}&include_adult=true'
                f'&language=en-US&page=1')
     headers = __get_headers()
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
 
     if response.status_code != 200:
         return []
@@ -597,7 +599,7 @@ def __get_movie_details(movie_id: str):
     url = f"https://api.themoviedb.org/3/movie/{movie_id}?language=en-US"
     headers = __get_headers()
 
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
 
     data = json.loads(response.text)
     details = MovieDetails(data)
@@ -613,7 +615,7 @@ def translation(movie: Movie):
 
     url = f"https://api.themoviedb.org/3/movie/{movie.id}/translations"
     headers = __get_headers()
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
 
     data = json.loads(response.text)
     movie_translation = MovieTranslation(data)

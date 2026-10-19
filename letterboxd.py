@@ -4,6 +4,8 @@ import config
 
 from letterboxdpy.movie import Movie
 
+REQUEST_TIMEOUT_SECONDS = 30
+
 
 def __letterboxd_movie_from_slug(slug):
     movie = Movie(slug)
@@ -60,7 +62,7 @@ def slug_from_short_url(uri):
 
 
 def __get_redirected_url(url) -> str:
-    response = requests.head(url, allow_redirects=True)
+    response = requests.head(url, allow_redirects=True, timeout=REQUEST_TIMEOUT_SECONDS)
     return response.url
 
 
