@@ -118,8 +118,10 @@ const sections = {
     "tmdb": ["tmdb_use_api","tmdb_cache","tmdb_invalidate_cache","tmdb_invalidate_cache_days",
              "tmdb_api_key","tmdb_language_code","tmdb_release_country_code","tmdb_release_type"],
     "existing files": ["watchlist_path","watched_path","ratings_path"],
-    "files to create": ["missing_path","ignore_path","mapping_path","autoselection_path"]
+    "files to create": ["missing_path","ignore_path","mapping_path","autoselection_path"],
+    "web settings": ["web_username","web_password"]
 };
+const secretKeys = new Set(["token", "api_password", "tmdb_api_key", "web_password"]);
 
 async function loadConfig() {
     const res = await fetch('/config/data');
@@ -186,7 +188,7 @@ async function loadConfig() {
                 input.value = value.join(', ');
             } else {
                 input = document.createElement('input');
-                input.type = 'text';
+                input.type = secretKeys.has(key) ? 'password' : 'text';
                 input.id = key;
                 input.name = key;
                 input.value = value;

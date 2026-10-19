@@ -1,4 +1,5 @@
 import argparse
+import hmac
 import os
 import json
 import logging
@@ -30,6 +31,21 @@ app = Flask(__name__)
 
 plex = None
 movies = None
+
+SECRET_PLACEHOLDER = "********"
+SECRET_CONFIG_KEYS = {"token", "api_password", "tmdb_api_key", "web_password"}
+EDITABLE_CONFIG_KEYS = {
+    "baseurl", "token",
+    "use_api", "api_username", "api_password", "api_use_2fa_code",
+    "use_playlist_as_watchlist", "use_builtin_watchlist", "sort_by_title", "ignore_words",
+    "ignore_movies_in_existing_watchlist", "include_watched_not_rated",
+    "existing_watchlist_name", "watchlist_name_to_create",
+    "tmdb_use_api", "tmdb_cache", "tmdb_invalidate_cache", "tmdb_invalidate_cache_days", "tmdb_api_key",
+    "tmdb_language_code", "tmdb_release_country_code", "tmdb_release_type",
+    "watchlist_path", "watched_path", "ratings_path",
+    "missing_path", "ignore_path", "mapping_path", "autoselection_path",
+    "web_username", "web_password",
+}
 
 TASK_LOG_LIMIT = 200
 THREAD_TASKS = {"watchlist", "rating"}
@@ -147,6 +163,20 @@ def run_rating(logger, progress_callback=None, auth_code=None):
     logger.name = 'RATING'
     rating.rating(plex, movies, logger, progress_callback)
     return "Updated ratings"
+
+@app.before_request
+def require_auth():
+    if not config.web_username or not config.web_password:
+        return None
+
+    auth = request.authorization
+    if auth \
+            and hmac.compare_digest((auth.username or "").encode(), str(config.web_username).encode()) \
+            and hmac.compare_digest((auth.password or "").encode(), str(config.web_password).encode()):
+        return None
+
+    return Response("Authentication required", 401, {"WWW-Authenticate": 'Basic realm="LetterboxdToPlex"'})
+
 
 @app.route("/")
 def index():
@@ -668,16 +698,31 @@ def config_data():
             value = str(value)
 
         cfg[key] = value
+
+    cfg = {key: value for key, value in cfg.items() if key in EDITABLE_CONFIG_KEYS}
+    for key in SECRET_CONFIG_KEYS:
+        if cfg.get(key):
+            cfg[key] = SECRET_PLACEHOLDER
     return jsonify(cfg)
 
 @app.route("/config/save", methods=["POST"])
 def config_save():
     global plex, movies
     try:
-        cfg = request.get_json()
+        cfg = {key: value for key, value in request.get_json().items() if key in EDITABLE_CONFIG_KEYS}
+        for key in SECRET_CONFIG_KEYS:
+            if cfg.get(key) == SECRET_PLACEHOLDER:  # unchanged masked value
+                cfg[key] = getattr(config, key)
+
+        # keep keys that are only set in the file, e.g. paths that are not editable in the ui
+        stored = {}
+        if os.path.exists(config.config_path):
+            with open(config.config_path, encoding="utf-8") as f:
+                stored = json.load(f)
+        stored.update(cfg)
 
         with open(config.config_path, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=4)
+            json.dump(stored, f, indent=4)
 
         for key, value in cfg.items():
             current_value = getattr(config, key, None)

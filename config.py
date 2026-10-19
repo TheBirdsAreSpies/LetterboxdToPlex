@@ -49,6 +49,10 @@ mapping_path = "data/mapping.json"
 autoselection_path = "data/autoselection.json"
 db_path = "data/ltp.db"
 
+# web settings
+web_username = ""  # set username and password to protect the web interface with basic auth
+web_password = ""
+
 web_mode = False
 
 

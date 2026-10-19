@@ -77,6 +77,8 @@ Edit `config.py` to change your settings.
 | **ignore_path**                         | The path of the created `ignore.json`                                                                                                                                       |
 | **mapping_path**                        | The path of the created `mapping.json`                                                                                                                                      |
 | **autoselection_path**                  | The path of the created `autoselection.json`                                                                                                                                |
+| **web_username**                        | Username for the web interface - basic auth is only enabled if `web_username` and `web_password` are set                                                                    |
+| **web_password**                        | Password for the web interface                                                                                                                                              |
 
 
 #### 📺 TMDB & Letterboxdpy (recommended)
