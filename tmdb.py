@@ -451,12 +451,9 @@ def create_table():
 def reorganize_indexes():
     connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
-    cursor.execute('DROP INDEX IF EXISTS idx_tmdb_id;')
-    cursor.execute('CREATE INDEX idx_tmdb_id ON tmdb_cache (tmdb_id);')
-    cursor.execute('DROP INDEX IF EXISTS idx_lb_title_year;')
-    cursor.execute('CREATE INDEX idx_lb_title_year ON tmdb_cache (lb_title, lb_year);')
-    cursor.execute('DROP INDEX IF EXISTS idx_translated_title_release_date;')
-    cursor.execute('CREATE INDEX idx_translated_title_release_date ON tmdb_cache '
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tmdb_id ON tmdb_cache (tmdb_id);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_lb_title_year ON tmdb_cache (lb_title, lb_year);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_translated_title_release_date ON tmdb_cache '
                    '(tmdb_translated_title, tmdb_release_date);')
     connection.commit()
 
