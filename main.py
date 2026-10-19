@@ -32,6 +32,7 @@ movies = None
 
 TASK_LOG_LIMIT = 200
 THREAD_TASKS = {"watchlist", "rating"}
+PLEX_ACTIONS = THREAD_TASKS | {"owned"}
 task_states = {}
 task_listeners = {}
 task_state_lock = threading.Lock()
@@ -366,6 +367,9 @@ def action(name):
         "refresh_release_cache"
     ]:
         return jsonify(success=False, message=f"Unknown action '{name}'")
+
+    if name in PLEX_ACTIONS and movies is None:
+        return jsonify(success=False, message="Not connected to Plex. Check the Plex settings in the config.")
 
     if name in THREAD_TASKS:
         started, message = _run_threaded_task(name)

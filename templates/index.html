@@ -167,6 +167,12 @@
         try {
             if (name === "owned") {
                 const res = await fetch('/action/' + name, { method: 'POST' });
+                if ((res.headers.get('Content-Type') || '').includes('application/json')) {
+                    const data = await res.json();
+                    status.innerText = data.message;
+                    status.style.background = '#ffe6e6';
+                    return;
+                }
                 const blob = await res.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -182,7 +188,7 @@
                 const res = await fetch('/action/' + name, { method: 'POST' });
                 const data = await res.json();
                 status.innerText = data.message;
-                status.style.background = '#e6ffe6';
+                status.style.background = data.success ? '#e6ffe6' : '#ffe6e6';
 
                 if (STREAM_TASKS.has(name) && data.success) {
                     status.style.background = '#eef';
