@@ -53,12 +53,14 @@ class Session:
         "unexpected non-json response on login",
     )
 
+    # the csrf cookie is fetched fresh on every login, a persisted stale one could shadow it
     _COOKIE_KEYS_TO_PERSIST = (
         "cf_clearance",
         "__cf_bm",
-        "com.xk72.webparts.csrf",
         "letterboxd.signed.in",
     )
+
+    CLOUDSCRAPER_FINGERPRINT = "cloudscraper"
 
     _log = logging.getLogger("LETTERBOXD_SESSION")
 
@@ -69,6 +71,7 @@ class Session:
         self._csrf = None
         self._is_logged_in = False
         self._scraper = None
+        self._impersonate = None
         self._cookie_store_path = str(getattr(config, "api_cookie_store_path", "data/letterboxd_cookies.json"))
 
         self.sign_in(username, password, use_2fa_code)
@@ -155,9 +158,25 @@ class Session:
                     raise
         return method(url, **kwargs)
 
+    @staticmethod
+    def _cookie_objects(cookies):
+        # curl_cffi's Cookies yields names when iterated, its underlying jar yields Cookie objects
+        return list(getattr(cookies, "jar", cookies))
+
+    def _session_fingerprint(self, session):
+        if session.__class__.__module__.startswith("cloudscraper"):
+            return self.CLOUDSCRAPER_FINGERPRINT
+        return self._impersonate
+
+    def _ordered_impersonates(self, impersonates):
+        preferred = self._impersonate or self._read_persisted_fingerprint()
+        if preferred in impersonates:
+            return (preferred,) + tuple(i for i in impersonates if i != preferred)
+        return tuple(impersonates)
+
     def _copy_cookies(self, source_session, target_session):
         try:
-            for cookie in source_session.cookies:
+            for cookie in self._cookie_objects(source_session.cookies):
                 target_session.cookies.set(cookie.name, cookie.value, domain=cookie.domain, path=cookie.path)
         except Exception:
             pass
@@ -169,7 +188,7 @@ class Session:
     def _iter_cookie_records(self, cookie_jar):
         records = []
         try:
-            for cookie in cookie_jar:
+            for cookie in self._cookie_objects(cookie_jar):
                 if not self._should_persist_cookie(getattr(cookie, "name", "")):
                     continue
 
@@ -184,17 +203,35 @@ class Session:
             return []
         return records
 
-    def _load_persisted_cookies(self, session):
-        if not self._cookie_store_path:
-            return
-        if not os.path.exists(self._cookie_store_path):
-            return
+    def _read_persisted_payload(self):
+        if not self._cookie_store_path or not os.path.exists(self._cookie_store_path):
+            return None
 
         try:
             with open(self._cookie_store_path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
+        except Exception:
+            self._log.debug("Failed to read persisted cookies from %s", self._cookie_store_path, exc_info=True)
+            return None
 
-            cookies = payload.get("cookies", []) if isinstance(payload, dict) else []
+        return payload if isinstance(payload, dict) else None
+
+    def _read_persisted_fingerprint(self):
+        payload = self._read_persisted_payload()
+        return payload.get("fingerprint") if payload else None
+
+    def _load_persisted_cookies(self, session):
+        payload = self._read_persisted_payload()
+        if not payload:
+            return
+
+        # cf_clearance is bound to the client fingerprint, cookies of another client would only trigger a challenge
+        if payload.get("fingerprint") != self._session_fingerprint(session):
+            self._log.info("Skipping persisted Letterboxd cookies, they belong to another client fingerprint")
+            return
+
+        try:
+            cookies = payload.get("cookies", [])
             loaded_count = 0
             for cookie in cookies:
                 name = cookie.get("name")
@@ -232,6 +269,7 @@ class Session:
 
         payload = {
             "saved_at": int(time.time()),
+            "fingerprint": self._session_fingerprint(session),
             "cookies": cookies,
         }
 
@@ -260,15 +298,13 @@ class Session:
 
             time.sleep(1)
 
-    def _switch_to_cloudscraper(self):
-        if self._scraper is not None and getattr(self._scraper, "__class__", None) is not None:
-            module_name = self._scraper.__class__.__module__
-            if module_name.startswith("cloudscraper"):
-                return self._scraper
+    def _switch_to_cloudscraper(self, session):
+        if self._scraper is not None and self._session_fingerprint(self._scraper) == self.CLOUDSCRAPER_FINGERPRINT:
+            return self._scraper
 
         browser_session = self._create_cloudscraper_session()
-        if self._scraper is not None:
-            self._copy_cookies(self._scraper, browser_session)
+        self._load_persisted_cookies(browser_session)
+        self._copy_cookies(self._scraper or session, browser_session)
 
         self._scraper = browser_session
         self._persist_cookies(self._scraper)
@@ -277,7 +313,7 @@ class Session:
     def _request_with_cloudflare_recovery(self, session, method_name, url, impersonate=None, **kwargs):
         response = self._request(session, method_name, url, impersonate=impersonate, **kwargs)
         if self._is_cloudflare_challenge(response):
-            browser_session = self._switch_to_cloudscraper()
+            browser_session = self._switch_to_cloudscraper(session)
             response = self._request(browser_session, method_name, url, **kwargs)
 
         self._raise_if_cloudflare_challenge(response)
@@ -340,9 +376,14 @@ class Session:
         last_error = None
         attempts_used = 0
 
+        impersonates = self._ordered_impersonates(self.LOGIN_IMPERSONATES)
+
         for attempt in range(1, self.MAX_LOGIN_ATTEMPTS + 1):
             attempts_used = attempt
-            impersonate = self.LOGIN_IMPERSONATES[(attempt - 1) % len(self.LOGIN_IMPERSONATES)]
+            impersonate = impersonates[(attempt - 1) % len(impersonates)]
+            # start every attempt with a fresh client, otherwise the scraper of a failed attempt is reused
+            self._scraper = None
+            self._impersonate = impersonate
             session = self._create_session()
             self._load_persisted_cookies(session)
             self._log.info("Letterboxd login attempt %s/%s", attempt, self.MAX_LOGIN_ATTEMPTS)
@@ -423,9 +464,13 @@ class Session:
         last_error = None
         attempts_used = 0
 
+        # start with the fingerprint used for the login, so the clearance cookie stays valid
+        impersonates = self._ordered_impersonates(self.DOWNLOAD_IMPERSONATES)
+
         for attempt in range(1, self.MAX_DOWNLOAD_ATTEMPTS + 1):
             attempts_used = attempt
-            impersonate = self.DOWNLOAD_IMPERSONATES[(attempt - 1) % len(self.DOWNLOAD_IMPERSONATES)]
+            impersonate = impersonates[(attempt - 1) % len(impersonates)]
+            self._impersonate = impersonate
             self._log.info("Letterboxd export download attempt %s/%s", attempt, self.MAX_DOWNLOAD_ATTEMPTS)
             try:
                 response = self._request_with_cloudflare_recovery(
