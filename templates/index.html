@@ -158,7 +158,7 @@
         };
     }
 
-    async function runAction(name) {
+    async function runAction(name, authCode = null) {
         const status = document.getElementById('status');
         status.style.display = 'block';
         status.style.background = '#eef';
@@ -185,8 +185,21 @@
                 status.innerText = "Owned CSV downloaded";
                 status.style.background = '#e6ffe6';
             } else {
-                const res = await fetch('/action/' + name, { method: 'POST' });
+                const res = await fetch('/action/' + name, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(authCode ? { auth_code: authCode } : {})
+                });
                 const data = await res.json();
+
+                if (data.requires_2fa) {
+                    const code = window.prompt('Letterboxd 2FA code:');
+                    if (code) return runAction(name, code);
+                    status.innerText = 'Cancelled, no 2FA code entered';
+                    status.style.background = '#ffe6e6';
+                    return;
+                }
+
                 status.innerText = data.message;
                 status.style.background = data.success ? '#e6ffe6' : '#ffe6e6';
 

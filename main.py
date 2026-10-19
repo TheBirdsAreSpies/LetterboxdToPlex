@@ -102,7 +102,7 @@ def _extract_export_archive(zipfile_name, progress_callback=None, required_files
             log_progress(progress_callback, f"Recovered missing export file '{required_basename}' from nested ZIP path")
 
 
-def lb_export(task_name=None, progress_callback=None):
+def lb_export(task_name=None, progress_callback=None, auth_code=None):
     if not config.use_api:
         return
 
@@ -111,7 +111,7 @@ def lb_export(task_name=None, progress_callback=None):
 
     try:
         log_progress(progress_callback, "Signing in to Letterboxd...")
-        session = Session(config.api_username, config.api_password, config.api_use_2fa_code)
+        session = Session(config.api_username, config.api_password, config.api_use_2fa_code, auth_code)
         log_progress(progress_callback, "Downloading latest Letterboxd export...")
         session.download_export_data(zipfile_name)
         _extract_export_archive(zipfile_name, progress_callback, required_files=required_files)
@@ -129,8 +129,8 @@ def lb_export(task_name=None, progress_callback=None):
         )
 
 
-def run_watchlist(logger, progress_callback=None):
-    lb_export("watchlist", progress_callback)
+def run_watchlist(logger, progress_callback=None, auth_code=None):
+    lb_export("watchlist", progress_callback, auth_code)
 
     logger.name = 'WATCHLIST'
     watchlist.watchlist(plex, movies, logger, progress_callback)
@@ -140,8 +140,8 @@ def run_owned(logger, amount=200):
     logger.name = 'OWNED'
     return owned.create_csv(movies, amount, logger)
 
-def run_rating(logger, progress_callback=None):
-    lb_export("rating", progress_callback)
+def run_rating(logger, progress_callback=None, auth_code=None):
+    lb_export("rating", progress_callback, auth_code)
 
     logger.name = 'RATING'
     rating.rating(plex, movies, logger, progress_callback)
@@ -321,7 +321,7 @@ def _task_status_payload():
     }
 
 
-def _run_threaded_task(name):
+def _run_threaded_task(name, auth_code=None):
     task_runners = {
         "watchlist": run_watchlist,
         "rating": run_rating,
@@ -340,7 +340,7 @@ def _run_threaded_task(name):
         logger.setLevel(logging.INFO)
 
         try:
-            result = task_runners[name](logger, lambda msg: _append_task_log(name, msg))
+            result = task_runners[name](logger, lambda msg: _append_task_log(name, msg), auth_code)
             if result:
                 _append_task_log(name, result)
             _finish_task_state(name, "completed", result or f"{name.capitalize()} task completed")
@@ -372,7 +372,13 @@ def action(name):
         return jsonify(success=False, message="Not connected to Plex. Check the Plex settings in the config.")
 
     if name in THREAD_TASKS:
-        started, message = _run_threaded_task(name)
+        payload = request.get_json(silent=True) or {}
+        auth_code = str(payload.get("auth_code") or "").strip() or None
+        if config.use_api and config.api_use_2fa_code and not auth_code:
+            # the task thread cannot prompt on the console, the browser has to provide the code
+            return jsonify(success=False, requires_2fa=True, message="Letterboxd 2FA code required")
+
+        started, message = _run_threaded_task(name, auth_code)
         return jsonify(success=started, message=message)
 
     elif name == "owned":

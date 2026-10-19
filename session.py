@@ -64,7 +64,7 @@ class Session:
 
     _log = logging.getLogger("LETTERBOXD_SESSION")
 
-    def __init__(self, username: str, password: str, use_2fa_code):
+    def __init__(self, username: str, password: str, use_2fa_code, auth_code: Optional[str] = None):
         if not username or not password:
             raise Exception("Username or password not set.")
 
@@ -74,7 +74,7 @@ class Session:
         self._impersonate = None
         self._cookie_store_path = str(getattr(config, "api_cookie_store_path", "data/letterboxd_cookies.json"))
 
-        self.sign_in(username, password, use_2fa_code)
+        self.sign_in(username, password, use_2fa_code, auth_code)
 
     @staticmethod
     def _response_snippet(response, max_length=RESPONSE_SNIPPET_LENGTH):
@@ -368,9 +368,12 @@ class Session:
 
         return None
 
-    def sign_in(self, username, password, use_2fa_code):
-        auth_code = ""
-        if use_2fa_code:
+    def sign_in(self, username, password, use_2fa_code, auth_code: Optional[str] = None):
+        if not use_2fa_code:
+            auth_code = ""
+        elif not auth_code:
+            if config.web_mode:
+                raise Exception("2FA code required, but none was provided.")
             auth_code = input("Enter 2FA code: ")
 
         last_error = None
