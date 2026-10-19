@@ -1,9 +1,14 @@
 import re
 import time
 import random
+import json
+import os
+import logging
 from typing import Optional
 
 from curl_cffi import requests as curl_requests
+
+import config
 
 try:
     import cloudscraper
@@ -30,10 +35,10 @@ class Session:
     LOGIN_IMPERSONATES = ("chrome", "chrome120", "edge101")
     DOWNLOAD_IMPERSONATES = LOGIN_IMPERSONATES
 
-    MAX_LOGIN_ATTEMPTS = 4
+    MAX_LOGIN_ATTEMPTS = 6
     MAX_DOWNLOAD_ATTEMPTS = 4
-    BASE_RETRY_SECONDS = 2
-    MAX_RETRY_SECONDS = 20
+    BASE_RETRY_SECONDS = 3
+    MAX_RETRY_SECONDS = 45
 
     _CHALLENGE_MARKERS = (
         "Just a moment",
@@ -48,6 +53,15 @@ class Session:
         "unexpected non-json response on login",
     )
 
+    _COOKIE_KEYS_TO_PERSIST = (
+        "cf_clearance",
+        "__cf_bm",
+        "com.xk72.webparts.csrf",
+        "letterboxd.signed.in",
+    )
+
+    _log = logging.getLogger("LETTERBOXD_SESSION")
+
     def __init__(self, username: str, password: str, use_2fa_code):
         if not username or not password:
             raise Exception("Username or password not set.")
@@ -55,6 +69,7 @@ class Session:
         self._csrf = None
         self._is_logged_in = False
         self._scraper = None
+        self._cookie_store_path = str(getattr(config, "api_cookie_store_path", "data/letterboxd_cookies.json"))
 
         self.sign_in(username, password, use_2fa_code)
 
@@ -99,6 +114,8 @@ class Session:
             return max(delay, base)
 
         delay = min(base, cls.MAX_RETRY_SECONDS)
+        if attempt == 1:
+            delay = max(delay, 6)
         jitter = random.uniform(0, 0.5)
         return delay + jitter
 
@@ -145,6 +162,104 @@ class Session:
         except Exception:
             pass
 
+    @classmethod
+    def _should_persist_cookie(cls, cookie_name):
+        return str(cookie_name or "") in cls._COOKIE_KEYS_TO_PERSIST
+
+    def _iter_cookie_records(self, cookie_jar):
+        records = []
+        try:
+            for cookie in cookie_jar:
+                if not self._should_persist_cookie(getattr(cookie, "name", "")):
+                    continue
+
+                records.append({
+                    "name": cookie.name,
+                    "value": cookie.value,
+                    "domain": getattr(cookie, "domain", None),
+                    "path": getattr(cookie, "path", "/") or "/",
+                    "secure": bool(getattr(cookie, "secure", False)),
+                })
+        except Exception:
+            return []
+        return records
+
+    def _load_persisted_cookies(self, session):
+        if not self._cookie_store_path:
+            return
+        if not os.path.exists(self._cookie_store_path):
+            return
+
+        try:
+            with open(self._cookie_store_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+
+            cookies = payload.get("cookies", []) if isinstance(payload, dict) else []
+            loaded_count = 0
+            for cookie in cookies:
+                name = cookie.get("name")
+                value = cookie.get("value")
+                if not name or value is None:
+                    continue
+
+                session.cookies.set(
+                    name,
+                    value,
+                    domain=cookie.get("domain"),
+                    path=cookie.get("path") or "/",
+                    secure=bool(cookie.get("secure", False)),
+                )
+                loaded_count += 1
+
+            if loaded_count:
+                self._log.info("Loaded %s persisted Letterboxd cookie(s) from %s", loaded_count, self._cookie_store_path)
+        except Exception:
+            # Ignore stale/invalid cookie files and continue with a clean session.
+            self._log.debug("Failed to load persisted cookies from %s", self._cookie_store_path, exc_info=True)
+            pass
+
+    def _persist_cookies(self, session):
+        if not self._cookie_store_path:
+            return
+
+        directory = os.path.dirname(self._cookie_store_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+
+        cookies = self._iter_cookie_records(session.cookies)
+        if not cookies:
+            return
+
+        payload = {
+            "saved_at": int(time.time()),
+            "cookies": cookies,
+        }
+
+        try:
+            with open(self._cookie_store_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            self._log.info("Persisted %s Letterboxd cookie(s) to %s", len(cookies), self._cookie_store_path)
+        except Exception:
+            self._log.debug("Failed to persist cookies to %s", self._cookie_store_path, exc_info=True)
+            pass
+
+    def _warmup_login_route(self, session, impersonate):
+        # Warm up Cloudflare and collect clearance cookies before requesting CSRF/login.
+        self._log.info("Running Letterboxd warmup request(s) before login")
+        for _ in range(2):
+            response = self._request_with_cloudflare_recovery(
+                session,
+                "get",
+                self.MAIN_PAGE_URL,
+                impersonate=impersonate,
+                timeout=self.LOGIN_TIMEOUT_SECONDS,
+            )
+            session = self._scraper or session
+            if response.status_code == 200:
+                break
+
+            time.sleep(1)
+
     def _switch_to_cloudscraper(self):
         if self._scraper is not None and getattr(self._scraper, "__class__", None) is not None:
             module_name = self._scraper.__class__.__module__
@@ -156,6 +271,7 @@ class Session:
             self._copy_cookies(self._scraper, browser_session)
 
         self._scraper = browser_session
+        self._persist_cookies(self._scraper)
         return self._scraper
 
     def _request_with_cloudflare_recovery(self, session, method_name, url, impersonate=None, **kwargs):
@@ -228,8 +344,12 @@ class Session:
             attempts_used = attempt
             impersonate = self.LOGIN_IMPERSONATES[(attempt - 1) % len(self.LOGIN_IMPERSONATES)]
             session = self._create_session()
+            self._load_persisted_cookies(session)
+            self._log.info("Letterboxd login attempt %s/%s", attempt, self.MAX_LOGIN_ATTEMPTS)
 
             try:
+                self._warmup_login_route(session, impersonate)
+                session = self._scraper or session
                 csrf = self._bootstrap_login(session, impersonate)
                 session = self._scraper or session
 
@@ -275,16 +395,19 @@ class Session:
 
                 self._scraper = session
                 self._csrf = response_data.get("csrf") or csrf
+                self._persist_cookies(self._scraper)
                 return self._is_logged_in
 
             except CloudflareChallengeError as exc:
                 last_error = exc
+                self._log.warning("Cloudflare challenge during login attempt %s/%s", attempt, self.MAX_LOGIN_ATTEMPTS)
                 if attempt == self.MAX_LOGIN_ATTEMPTS:
                     break
                 time.sleep(self._retry_delay_seconds(attempt, exc.retry_after_seconds))
                 continue
             except Exception as exc:
                 last_error = exc
+                self._log.warning("Letterboxd login attempt %s/%s failed: %s", attempt, self.MAX_LOGIN_ATTEMPTS, exc)
                 if self._is_retryable_login_error(exc) and attempt < self.MAX_LOGIN_ATTEMPTS:
                     time.sleep(self._retry_delay_seconds(attempt))
                     continue
@@ -303,6 +426,7 @@ class Session:
         for attempt in range(1, self.MAX_DOWNLOAD_ATTEMPTS + 1):
             attempts_used = attempt
             impersonate = self.DOWNLOAD_IMPERSONATES[(attempt - 1) % len(self.DOWNLOAD_IMPERSONATES)]
+            self._log.info("Letterboxd export download attempt %s/%s", attempt, self.MAX_DOWNLOAD_ATTEMPTS)
             try:
                 response = self._request_with_cloudflare_recovery(
                     self._scraper,
@@ -313,7 +437,6 @@ class Session:
                     stream=True,
                     timeout=self.DOWNLOAD_TIMEOUT_SECONDS
                 )
-
 
                 if response.status_code != 200:
                     raise Exception(f"Download failed: {response.status_code}")
@@ -331,16 +454,19 @@ class Session:
                         if chunk:
                             f.write(chunk)
 
+                self._persist_cookies(self._scraper)
                 return file_name
 
             except CloudflareChallengeError as exc:
                 last_error = exc
+                self._log.warning("Cloudflare challenge during export download attempt %s/%s", attempt, self.MAX_DOWNLOAD_ATTEMPTS)
                 if attempt == self.MAX_DOWNLOAD_ATTEMPTS:
                     break
                 time.sleep(self._retry_delay_seconds(attempt, exc.retry_after_seconds))
                 continue
             except Exception as exc:
                 last_error = exc
+                self._log.warning("Letterboxd export download attempt %s/%s failed: %s", attempt, self.MAX_DOWNLOAD_ATTEMPTS, exc)
                 break
 
         raise Exception(f"Unable to get web request after {attempts_used} attempt(s): {last_error}")
