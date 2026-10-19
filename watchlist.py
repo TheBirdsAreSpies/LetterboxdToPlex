@@ -278,7 +278,7 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
             to_add = __sort_playlist_ignore_words__(to_add)
 
         if len(to_add) > 0:
-            plex.createPlaylist(title='Letterboxd Watchlist', items=to_add)
+            plex.createPlaylist(title=config.watchlist_name_to_create, items=to_add)
             logger.info('Watchlist created')
         else:
             logger.info('Nothing to add.')
