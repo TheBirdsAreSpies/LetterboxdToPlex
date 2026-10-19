@@ -6,6 +6,8 @@ selection_requests = {}  # active pending selections for web (keyed by movie nam
 selection_events = {}    # threading.Event to block until web selection arrives
 selection_results = {}   # result chosen via web
 
+SELECTION_TIMEOUT_SECONDS = 30 * 60  # skip the movie if nobody picks one in the browser, so the task can finish
+
 
 def choose_movie(autoselector, combination, results, logger, web_mode=False):
     preselection = util.find_preselection(autoselector, combination, results)
@@ -29,14 +31,15 @@ def choose_movie(autoselector, combination, results, logger, web_mode=False):
         }
         ev = threading.Event()
         selection_events[combination.name] = ev
-        ev.wait()  # block until user picks
+        if not ev.wait(SELECTION_TIMEOUT_SECONDS):  # block until user picks
+            logger.warning(f'No selection made for {combination.name} ({combination.year}) in time - skipping.')
+
         chosen_key = selection_results.pop(combination.name, None)
+        selection_requests.pop(combination.name, None)
+        selection_events.pop(combination.name, None)
 
         if not chosen_key:  # most likely pressed "Skip" button
             return None
-
-        selection_requests.pop(combination.name, None)
-        selection_events.pop(combination.name, None)
 
         chosen_movie = next((m for m in results if m.key == chosen_key), None)
         if chosen_movie:
@@ -52,7 +55,11 @@ def choose_movie(autoselector, combination, results, logger, web_mode=False):
         edition = f", {movie.editionTitle}" if movie.editionTitle else ""
         print(f'{i}: {movie.title} ({movie.year}{edition})')
 
-    selection = int(input('Select movie: '))
+    try:
+        selection = int(input('Select movie: '))
+    except ValueError:
+        selection = 0
+
     if 1 <= selection <= len(results):
         chosen = results[selection - 1]
         logger.info(f'Console selected {chosen.title} ({chosen.year})')

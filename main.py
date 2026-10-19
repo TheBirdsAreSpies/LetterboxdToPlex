@@ -727,11 +727,7 @@ def choose_autoselection():
         for sel_id, sel in list(selector.selection_requests.items()):
             combo = sel["combination"]
             if combo.name == combo_name and combo.year == combo_year:
-                from autoselection import AutoSelection
-                autoselector = AutoSelection.load_json() or []
-                autoselector.append(AutoSelection(combo, selected_key))
-                AutoSelection.store_json(autoselector)
-
+                # the waiting task stores the autoselection itself
                 key_to_set_event = combo.name
 
                 del selector.selection_requests[sel_id]
