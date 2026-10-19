@@ -113,8 +113,8 @@ class Session:
         base = cls.BASE_RETRY_SECONDS * (2 ** (attempt - 1))
 
         if retry_after_seconds is not None and retry_after_seconds > 0:
-            delay = retry_after_seconds * (2 ** (attempt - 1))
-            return max(delay, base)
+            # honor the server's value, but do not grow it exponentially
+            return max(retry_after_seconds, min(base, cls.MAX_RETRY_SECONDS))
 
         delay = min(base, cls.MAX_RETRY_SECONDS)
         if attempt == 1:
