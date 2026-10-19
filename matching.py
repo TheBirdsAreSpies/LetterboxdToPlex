@@ -48,7 +48,8 @@ def find_by_tmdb_id(movies, name, tmdb_id, autoselector, combination, logger: lo
     results = movies.search(title=name)
     matches = [
         result for result in results
-        if any(f"tmdb://{tmdb_id}" in str(guid.id) for guid in getattr(result, 'guids', []))
+        # exact comparison, a substring check would match tmdb://12 against tmdb://123
+        if any(str(guid.id) == f"tmdb://{tmdb_id}" for guid in getattr(result, 'guids', []))
     ]
 
     if len(matches) == 1:
