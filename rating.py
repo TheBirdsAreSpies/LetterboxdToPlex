@@ -21,6 +21,8 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
 
     data = _read_ratings_csv_()
     publish_progress = util.progress_publisher(logger, progress_callback)
+    # loaded lazily, unchanged ratings are skipped without touching plex
+    library = matching.LibraryIndex(movies, logger)
 
     connection = sqlite3.connect(config.db_path)
     try:
@@ -67,16 +69,13 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
                     continue
 
                 if config.tmdb_use_api:
-                    tmdb_id, tmdb_name, tmdb_year = matching.lookup_tmdb(name, year, uri, logger)
+                    tmdb_id = matching.tmdb_id_from_uri(uri, logger)
+                    movie = matching.find_by_tmdb_id(library, movies, tmdb_id, autoselector, combination, logger)
 
                     # seems like a tv show, skip
-                    if tmdb_name is None:
+                    if not movie and matching.lookup_tmdb(lb_name, lb_year, tmdb_id, logger)[0] is None:
                         pbar.update(1)
                         continue
-
-                    name = tmdb_name
-                    year = tmdb_year
-                    movie = matching.find_by_tmdb_id(movies, name, tmdb_id, autoselector, combination, logger)
                 else:
                     movie = matching.find_by_title(movies, name, year, autoselector, combination, logger)
 

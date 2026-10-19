@@ -54,6 +54,7 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
 
     missing = MissingMovie.load_json() or []
     to_add = []
+    library = matching.LibraryIndex(movies, logger)
 
     with tqdm(total=len(sorted_data), unit='Movies') as pbar:
         for name, year, uri in sorted_data:
@@ -79,21 +80,11 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
                 pbar.update(1)
                 continue
 
+            lb_name = name
+            lb_year = year
             tmdb_id = None
             if config.tmdb_use_api:
-                tmdb_id, tmdb_name, tmdb_year = matching.lookup_tmdb(name, year, uri, logger)
-                if tmdb_name is None:
-                    logger.debug(f'Movie {combination.name} ({combination.year}) not found on TMDB, added to missing list')
-                    _mark_missing(missing, combination, tmdb_id, logger)
-                    pbar.update(1)
-                    continue
-
-                if tmdb_year == '':  # could happen if there is no rls-date on tmdb
-                    pbar.update(1)
-                    continue
-
-                name = tmdb_name
-                year = tmdb_year
+                tmdb_id = matching.tmdb_id_from_uri(uri, logger)
 
             manually_mapped = util.find_movie_by_letterboxd_title(mapping, combination)
 
@@ -118,7 +109,7 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
             was_missing_names.append(name)
 
             if config.tmdb_use_api:
-                selected = matching.find_by_tmdb_id(movies, name, tmdb_id, autoselector, combination, logger)
+                selected = matching.find_by_tmdb_id(library, movies, tmdb_id, autoselector, combination, logger)
             else:
                 selected = matching.find_by_title(movies, name, year, autoselector, combination, logger)
 
@@ -127,9 +118,18 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
                 to_add.append(selected)
                 was_missing_names.append(selected.title)
                 missing = util.remove_from_missing_if_needed(missing, was_missing_names)
-            else:
-                logger.info(f'Movie {name} ({year}) is missing')
-                _mark_missing(missing, combination, tmdb_id, logger)
+                pbar.update(1)
+                continue
+
+            if config.tmdb_use_api:
+                # tmdb data is only needed for the missing list, so it is resolved for missing movies only
+                tmdb_name, tmdb_year = matching.lookup_tmdb(lb_name, lb_year, tmdb_id, logger)
+                if tmdb_name is not None and tmdb_year == '':  # could happen if there is no rls-date on tmdb
+                    pbar.update(1)
+                    continue
+
+            logger.info(f'Movie {name} ({year}) is missing')
+            _mark_missing(missing, combination, tmdb_id, logger)
 
             pbar.update(1)
 
