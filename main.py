@@ -237,7 +237,13 @@ def _append_task_log(task_name, message, notify=True):
 
 
 def _start_task_state(task_name, message):
+    """Marks the task as running and returns None, or returns the name of the task that is already running."""
     with task_state_lock:
+        # tasks share the export files and the json stores, so only one may run at a time
+        running_task = next((name for name, state in task_states.items() if state.get("running")), None)
+        if running_task:
+            return running_task
+
         state = task_states.setdefault(task_name, _empty_task_state(task_name))
         state.update({
             "running": True,
@@ -248,6 +254,7 @@ def _start_task_state(task_name, message):
             "finished_at": None,
             "updated_at": time.time(),
         })
+        return None
 
 
 def _finish_task_state(task_name, status, message):
@@ -258,11 +265,6 @@ def _finish_task_state(task_name, status, message):
         state["message"] = message
         state["finished_at"] = time.time()
         state["updated_at"] = time.time()
-
-
-def _is_task_running(task_name):
-    with task_state_lock:
-        return bool(task_states.get(task_name, {}).get("running"))
 
 
 def _add_task_listener(task_name, listener):
@@ -327,11 +329,10 @@ def _run_threaded_task(name):
     if name not in task_runners:
         raise ValueError(f"Unknown threaded task '{name}'")
 
-    if _is_task_running(name):
-        return False, f"{name.capitalize()} task already running"
-
     start_message = f"{name.capitalize()} task started"
-    _start_task_state(name, start_message)
+    running_task = _start_task_state(name, start_message)
+    if running_task:
+        return False, f"{running_task.capitalize()} task already running"
 
     def run_task():
         logger = logging.getLogger(name.upper())
