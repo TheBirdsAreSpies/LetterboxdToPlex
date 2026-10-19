@@ -19,7 +19,7 @@
         .danger { background: #d33; }
         .danger:hover { background: #a00; }
         .action-bar { margin-bottom: 1.5rem; }
-        #status { padding: 0.8rem; background: #eef; border-radius: 5px; margin-bottom: 1rem; display:none; }
+        #status { padding: 0.8rem; background: #eef; border-radius: 5px; margin-bottom: 1rem; display:none; white-space: pre-wrap; }
 
         .action-bar > div { display:flex; gap:0.5rem; align-items:center; }
         .action-bar button { white-space:nowrap; }
@@ -96,7 +96,7 @@
             <td>
                 <button class="release-btn" onclick='showReleaseDetails({{ item.name|tojson }}, {{ item.year|tojson }}, {{ (item.release_date or "")|tojson }})'>Show</button>
             </td>
-            <td><button class="danger" onclick="ignoreItem('{{ item.name }}')">Ignore Movie</button></td>
+            <td><button class="danger" onclick='ignoreItem({{ item.name|tojson }})'>Ignore Movie</button></td>
         </tr>
         {% endfor %}
     </table>
@@ -131,19 +131,28 @@
     <script>
     const STREAM_TASKS = new Set(['watchlist', 'rating']);
 
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function attachTaskStream(taskName, status, reconnect = false) {
         const eventSource = new EventSource('/stream/' + taskName);
         const MAX_LINES = 50;
         let logLines = reconnect ? ['Reconnected to running ' + taskName + ' task...'] : [];
 
-        status.innerHTML = reconnect ? logLines.join('<br>') : '';
+        status.textContent = reconnect ? logLines.join('\n') : '';
 
         eventSource.onmessage = function (event) {
             logLines.push(event.data);
             if (logLines.length > MAX_LINES) {
                 logLines = logLines.slice(logLines.length - MAX_LINES);
             }
-            status.innerHTML = logLines.join('<br>');
+            status.textContent = logLines.join('\n');
             status.scrollTop = status.scrollHeight;
         };
 
@@ -153,7 +162,7 @@
             if (logLines.length > MAX_LINES) {
                 logLines = logLines.slice(logLines.length - MAX_LINES);
             }
-            status.innerHTML = logLines.join('<br>');
+            status.textContent = logLines.join('\n');
             status.scrollTop = status.scrollHeight;
         };
     }
@@ -254,7 +263,7 @@
             }
 
             if (!res.ok || !data.success) {
-                tbody.innerHTML = `<tr><td colspan="4">Error: ${(data && data.message) ? data.message : 'Unknown error'}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="4">Error: ${escapeHtml((data && data.message) ? data.message : 'Unknown error')}</td></tr>`;
                 return;
             }
 
@@ -268,12 +277,12 @@
 
             tbody.innerHTML = data.releases.map(r => {
                 const formattedDate = String(r.release_date || '').split('T')[0].split(' ')[0] || '-';
-                return `<tr><td>${r.country_code || '-'}</td><td>${r.release_type || '-'}</td><td>${r.release_type_id || '-'}</td><td>${formattedDate}</td></tr>`;
+                return `<tr><td>${escapeHtml(r.country_code || '-')}</td><td>${escapeHtml(r.release_type || '-')}</td><td>${escapeHtml(r.release_type_id || '-')}</td><td>${escapeHtml(formattedDate)}</td></tr>`;
             }).join('');
 
             updateRowStriping(document.getElementById('releaseDetailsTable'));
         } catch (err) {
-            tbody.innerHTML = `<tr><td colspan="4">Error: ${err}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="4">Error: ${escapeHtml(err)}</td></tr>`;
         }
     }
 
@@ -362,7 +371,7 @@
                 // Title
                 const title = document.createElement('div');
                 title.className = 'title';
-                title.innerHTML = `${sel.combination.name} (${sel.combination.year})`;
+                title.textContent = `${sel.combination.name} (${sel.combination.year})`;
                 row.appendChild(title);
 
                 // Buttons container
@@ -440,7 +449,7 @@
                     const status = document.getElementById('status');
                     status.style.display = 'block';
                     status.style.background = '#eef';
-                    status.innerHTML = 'Reconnecting to running ' + data.task_name + ' task...<br>';
+                    status.textContent = 'Reconnecting to running ' + data.task_name + ' task...';
                     attachTaskStream(data.task_name, status, true);
                 }
             } catch (err) {
