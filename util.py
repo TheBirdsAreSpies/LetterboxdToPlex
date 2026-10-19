@@ -90,6 +90,10 @@ def _normalize_title(value):
     return normalized
 
 
+def find_missing(missing, combination):
+    return next((m for m in missing if m.name == combination.name and m.year == combination.year), None)
+
+
 def remove_from_missing_if_needed(missing, names):
     names_set = {_normalize_title(name) for name in names if _normalize_title(name)}
     if not names_set:

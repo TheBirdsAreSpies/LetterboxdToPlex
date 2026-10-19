@@ -3,10 +3,9 @@ import config
 import datetime
 import autoselection
 import csv
-import letterboxd
+import matching
 import tmdb
 import util
-from selector import choose_movie
 
 from plexapi.exceptions import NotFound, BadRequest
 from missingmovie import MissingMovie
@@ -68,37 +67,21 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
                 pbar.update(1)
                 continue
 
+            tmdb_id = None
             if config.tmdb_use_api:
-                logger.debug(f'Trying to look it up on tmdb')
-                slug = letterboxd.slug_from_short_url(uri)
-                ids = letterboxd.ids_from_slug(slug)
-                tmdb_id = ids[0]
-                logger.info(f'Got TMDB id {tmdb_id}')
+                tmdb_id, tmdb_name, tmdb_year = matching.lookup_tmdb(name, year, uri, logger)
+                if tmdb_name is None:
+                    logger.debug(f'Movie {combination.name} ({combination.year}) not found on TMDB, added to missing list')
+                    combination.release_date = _refresh_release_date_for_missing(tmdb_id)
+                    missing.append(combination)
+                    continue
 
-                tmdb_movies = tmdb.search_movie(title=name, year=year)
-                if len(tmdb_movies) == 0:
-                    logger.info('Searched TMDB, was not able to find.')
-                    tmdb_movies = tmdb.search_movie(title=name)
-                    if len(tmdb_movies) == 0:
-                        logger.debug(f'Movie {combination.name} ({combination.year}) not found on TMDB, added to missing list')
-                        combination.release_date = _refresh_release_date_for_missing(tmdb_id)
-                        missing.append(combination)
-                        continue
-
-                tmdb_movie = tmdb_movies[0]
-                logger.info(f'Searched TMDB {name} ({year})')
-                org_title = name
-                org_year = year
-
-                # I think only tmdb_id is needed at this state. Whatever - this is not the bottleneck.
-                name = tmdb.translation(tmdb_movie)
-                year = tmdb_movie.release_date[:4]
-
-                if year == '':  # could happen if there is no rls-date on tmdb
+                if tmdb_year == '':  # could happen if there is no rls-date on tmdb
                     pbar.update(1)
                     continue
 
-                tmdb.store_movie_to_cache(name, year, org_title, org_year, tmdb_id)
+                name = tmdb_name
+                year = tmdb_year
 
             manually_mapped = util.find_movie_by_letterboxd_title(mapping, combination)
 
@@ -122,126 +105,26 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
             # add to list, will remove later if found
             was_missing_names.append(name)
 
-            # include year + 1 because lb is using premiere dates instead of cinema dates
-            years = [year, str(int(year) - 1), str(int(year) + 1)]
-
             if config.tmdb_use_api:
-                try:
-                    # try to search the movie the normal way first. compare guid then to avoid using movies.getGuid
-                    # because this function is really, really slow af
-                    # search(): 8 - 12 movies/s <> getGuid(): 2 - 4 movies/s
-                    tmdb_result = movies.search(title=name)
-                    logger.info(f'Found multiple movies for {name} ({year})')
+                selected = matching.find_by_tmdb_id(movies, name, tmdb_id, autoselector, combination, logger)
+            else:
+                selected = matching.find_by_title(movies, name, year, autoselector, combination, logger)
 
-                    if len(tmdb_result) > 0:
-                        matches = []
-
-                        for result in tmdb_result:
-                            guids = getattr(result, 'guids', [])
-                            if any(f"tmdb://{tmdb_id}" in str(guid.id) for guid in guids):
-                                matches.append(result)
-
-                        if len(matches) == 1:
-                            selected = matches[0]
-                            logger.info(f'Found {name} ({year}), will add to watchlist')
-                            to_add.append(selected)
-                            missing = util.remove_from_missing_if_needed(missing, was_missing_names)
-
-                        elif len(matches) > 1:
-                            logger.info(f'Found multiple possible matches for {name} ({year})')
-                            selected = choose_movie(
-                                autoselector, combination, matches, logger,
-                                web_mode=config.web_mode
-                            )
-
-                            if selected:
-                                logger.info(f'User selected {selected.title} ({selected.year})')
-                                to_add.append(selected)
-                                was_missing_names.append(selected.title)
-                                missing = util.remove_from_missing_if_needed(missing, was_missing_names)
-                            else:
-                                logger.info(f'User skipped selection for {name} ({year})')
-                                raise NotFound  # treat as missing for skip logic
-
-                        else:
-                            # No matching TMDB GUIDs found, fallback to slower getGuid()
-                            logger.debug(f'No exact GUID match found for {name} ({year}), trying TMDB GUID lookup...')
-                            result = movies.getGuid(f'tmdb://{tmdb_id}')
-                            if result:
-                                logger.info(f'Found {name} ({year}) via TMDB ID, will add to watchlist')
-                                to_add.append(result)
-                                missing = util.remove_from_missing_if_needed(missing, was_missing_names)
-                            else:
-                                raise NotFound
-                    else:
-                        # No Plex matches at all, fallback to TMDB GUID directly
-                        result = movies.getGuid(f'tmdb://{tmdb_id}')
-                        if result:
-                            logger.info(f'Found {name} ({year}) via TMDB ID, will add to watchlist')
-                            to_add.append(result)
-                            missing = util.remove_from_missing_if_needed(missing, was_missing_names)
-                        else:
-                            raise NotFound
-                except NotFound:
-                    logger.info(f'Movie {name} ({year}) is missing')
-                    for existing in missing:
-                        if combination.name == existing.name and combination.year == existing.year:
-                            logger.debug(f'Refreshing release_date for movie {existing.name} ({existing.year})')
-                            existing.release_date = _refresh_release_date_for_missing(tmdb_id)
-                            break
-                    else:
-                        logger.debug(f'Movie {combination.name} ({combination.year}) added to missing list')
-                        combination.release_date = _refresh_release_date_for_missing(tmdb_id)
-                        missing.append(combination)
-            else:  # old way
-                result = movies.search(title=name, year=years)
-
-                if len(result) == 1:
-                    logger.info(f'Found {name} ({year}), will add to watchlist')
-                    to_add.append(result[0])
-                    missing = util.remove_from_missing_if_needed(missing, was_missing_names)
-
-                elif len(result) > 1:
-                    preselection = util.find_preselection(autoselector, combination, result)
-
-                    logger.info(f'Found multiple movies for {name} ({year})')
-                    if preselection:
-                        logger.info(f'Auto selected {preselection.title} ({preselection.year})')
-                        to_add.append(preselection)
-                        was_missing_names.append(preselection.title)
-                        missing = util.remove_from_missing_if_needed(missing, was_missing_names)
-                    else:
-                        counter = 1
-                        print(f'\nFound multiple movies for {name} ({year}):')
-
-                        for movie in result:
-                            if movie.editionTitle is None:
-                                logger.debug(f'{counter}: {movie.title} ({movie.year})')
-                                print(f'{counter}: {movie.title} ({movie.year})')
-                            else:
-                                logger.debug(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
-                                print(f'{counter}: {movie.title} ({movie.year}, {movie.editionTitle})')
-
-                            counter += 1
-
-                        selection = int(input('Use:'))
-                        if 0 < selection < len(result) + 1:
-                            res = result[selection - 1]
-                            logger.debug(f'WATCHLIST: Selected {counter}: {res.title}')
-                            selector = autoselection.AutoSelection(combination, res.key)
-                            autoselector.append(selector)
-                            autoselection.AutoSelection.store_json(autoselector)
-                            to_add.append(res)
-                            was_missing_names.append(res.title)
-                            missing = util.remove_from_missing_if_needed(missing, was_missing_names)
-
-                else:  # len(result) == 0:
-                    logger.info(f'Movie {name} ({year}) is missing')
-                    is_present = any(
-                        combination.name == existing.name and combination.year == existing.year for existing in missing)
-                    if not is_present:
-                        logger.debug(f'Movie {name} ({year}) added to missing list')
-                        missing.append(combination)
+            if selected:
+                logger.info(f'Found {selected.title} ({selected.year}), will add to watchlist')
+                to_add.append(selected)
+                was_missing_names.append(selected.title)
+                missing = util.remove_from_missing_if_needed(missing, was_missing_names)
+            else:
+                logger.info(f'Movie {name} ({year}) is missing')
+                existing = util.find_missing(missing, combination)
+                if existing is None:
+                    logger.debug(f'Movie {combination.name} ({combination.year}) added to missing list')
+                    existing = combination
+                    missing.append(combination)
+                if config.tmdb_use_api:
+                    logger.debug(f'Refreshing release_date for movie {existing.name} ({existing.year})')
+                    existing.release_date = _refresh_release_date_for_missing(tmdb_id)
 
             pbar.update(1)
 
