@@ -22,6 +22,18 @@ def _refresh_release_date_for_missing(tmdb_id):
         return None
 
 
+def _mark_missing(missing, combination, tmdb_id, logger: logging.Logger):
+    existing = util.find_missing(missing, combination)
+    if existing is None:
+        logger.debug(f'Movie {combination.name} ({combination.year}) added to missing list')
+        existing = combination
+        missing.append(combination)
+
+    if tmdb_id is not None:
+        logger.debug(f'Refreshing release_date for movie {existing.name} ({existing.year})')
+        existing.release_date = _refresh_release_date_for_missing(tmdb_id)
+
+
 def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
     current_year = datetime.datetime.now().year
     to_ignore = IgnoreMovie.load_json() or []
@@ -72,8 +84,8 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
                 tmdb_id, tmdb_name, tmdb_year = matching.lookup_tmdb(name, year, uri, logger)
                 if tmdb_name is None:
                     logger.debug(f'Movie {combination.name} ({combination.year}) not found on TMDB, added to missing list')
-                    combination.release_date = _refresh_release_date_for_missing(tmdb_id)
-                    missing.append(combination)
+                    _mark_missing(missing, combination, tmdb_id, logger)
+                    pbar.update(1)
                     continue
 
                 if tmdb_year == '':  # could happen if there is no rls-date on tmdb
@@ -117,14 +129,7 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
                 missing = util.remove_from_missing_if_needed(missing, was_missing_names)
             else:
                 logger.info(f'Movie {name} ({year}) is missing')
-                existing = util.find_missing(missing, combination)
-                if existing is None:
-                    logger.debug(f'Movie {combination.name} ({combination.year}) added to missing list')
-                    existing = combination
-                    missing.append(combination)
-                if config.tmdb_use_api:
-                    logger.debug(f'Refreshing release_date for movie {existing.name} ({existing.year})')
-                    existing.release_date = _refresh_release_date_for_missing(tmdb_id)
+                _mark_missing(missing, combination, tmdb_id, logger)
 
             pbar.update(1)
 
