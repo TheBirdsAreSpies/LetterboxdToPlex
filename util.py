@@ -30,6 +30,15 @@ def resolve_existing_path(file_path):
     return None
 
 
+def progress_publisher(logger, progress_callback=None):
+    def publish(message):
+        logger.info(message)
+        if progress_callback:
+            progress_callback(message)
+
+    return publish
+
+
 def read_general_csv(file_path):
     data = []
 

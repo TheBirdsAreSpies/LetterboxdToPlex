@@ -29,6 +29,7 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
     mapping = Mapping.load_json() or []
     autoselector = autoselection.AutoSelection.load_json() or []
 
+    publish_progress = util.progress_publisher(logger, progress_callback)
     logger.info("Started importing watchlist")
 
     data = __read_watchlist_csv__(config.watchlist_path)
@@ -48,8 +49,7 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
             skip = False
             combination = Movie(name, year)
             pbar.set_description(f'Processing {name} ({year})'.ljust(80, ' '))
-            logger.info(f'Processing {name} ({year})')
-            progress_callback(f'Processing {name} ({year})')
+            publish_progress(f'Processing {name} ({year})')
 
             was_missing_names = []
 
@@ -249,13 +249,11 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
         try:
             playlist = plex.playlist(config.watchlist_name_to_create)
             playlist.delete()
-            logger.info('Watchlist deleted')
             pbar.write("\nWatchlist deleted.")
-            progress_callback("Watchlist deleted.")
+            publish_progress("Watchlist deleted.")
         except NotFound:
-            logger.info('Playlist not existing yet. No worries, nothing to do.')
             pbar.write("\nPlaylist not existing yet. No worries, nothing to do.")
-            progress_callback("Playlist not existing yet. No worries, nothing to do.")
+            publish_progress("Playlist not existing yet. No worries, nothing to do.")
 
 
         if config.ignore_movies_in_existing_watchlist:
@@ -273,7 +271,8 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
             except NotFound:
                 logger.warning('Existing watchlist not found!')
                 pbar.write("\nExisting watchlist not found!")
-                progress_callback("Existing watchlist not found!")
+                if progress_callback:
+                    progress_callback("Existing watchlist not found!")
 
         if config.sort_by_title:
             to_add = __sort_playlist_ignore_words__(to_add)
@@ -297,7 +296,7 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
     MissingMovie.store_json(missing)
     autoselection.AutoSelection.store_json(autoselector)
 
-    progress_callback("Synchronized Watchlist")
+    publish_progress("Synchronized Watchlist")
 
 
 def __read_watchlist_csv__(file_path):
