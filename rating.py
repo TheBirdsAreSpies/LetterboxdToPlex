@@ -13,7 +13,7 @@ from missingmovie import MissingMovie
 from tqdm import tqdm
 
 
-def rating(plex, movies, logger: logging.Logger, progress_callback=None):
+def rating(plex, movies, logger: logging.Logger, progress_callback=None, library=None):
     to_ignore = IgnoreMovie.load_json() or []
     missing = MissingMovie.load_json() or []
     autoselector = autoselection.AutoSelection.load_json() or []
@@ -22,7 +22,7 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None):
     data = _read_ratings_csv_()
     publish_progress = util.progress_publisher(logger, progress_callback)
     # loaded lazily, unchanged ratings are skipped without touching plex
-    library = matching.LibraryIndex(movies, logger)
+    library = library or matching.LibraryIndex(movies, logger)
 
     connection = sqlite3.connect(config.db_path)
     try:

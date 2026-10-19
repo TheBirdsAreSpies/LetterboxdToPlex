@@ -38,7 +38,7 @@ def _mark_missing(missing, combination, tmdb_id, logger: logging.Logger):
         existing.release_date = _refresh_release_date_for_missing(tmdb_id)
 
 
-def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
+def watchlist(plex, movies, logger: logging.Logger, progress_callback=None, library=None):
     current_year = datetime.datetime.now().year
     to_ignore = IgnoreMovie.load_json() or []
     mapping = Mapping.load_json() or []
@@ -58,7 +58,7 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None):
 
     missing = MissingMovie.load_json() or []
     to_add = []
-    library = matching.LibraryIndex(movies, logger)
+    library = library or matching.LibraryIndex(movies, logger)
 
     with tqdm(total=len(sorted_data), unit='Movies') as pbar:
         for name, year, uri in sorted_data:

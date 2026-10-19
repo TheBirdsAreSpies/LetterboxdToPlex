@@ -54,6 +54,7 @@
 
     <div class="action-bar" style="display:flex; justify-content:space-between; align-items:center;">
         <div>
+            <button onclick="runAction('sync')">Synchronize Watchlist &amp; Ratings</button>
             <button onclick="runAction('watchlist')">Synchronize Watchlist</button>
             <button onclick="runAction('owned')">Create Owned List</button>
             <button onclick="runAction('rating')">Update Ratings</button>
@@ -129,7 +130,7 @@
     </div>
 
     <script>
-    const STREAM_TASKS = new Set(['watchlist', 'rating']);
+    const STREAM_TASKS = new Set(['watchlist', 'rating', 'sync']);
 
     function escapeHtml(value) {
         return String(value)

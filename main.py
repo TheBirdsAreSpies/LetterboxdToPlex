@@ -14,6 +14,7 @@ from enum import Enum
 import csv
 import config
 import letterboxd
+import matching
 import owned
 import rating
 import tmdb
@@ -48,7 +49,7 @@ EDITABLE_CONFIG_KEYS = {
 }
 
 TASK_LOG_LIMIT = 200
-THREAD_TASKS = {"watchlist", "rating"}
+THREAD_TASKS = {"watchlist", "rating", "sync"}
 PLEX_ACTIONS = THREAD_TASKS | {"owned"}
 task_states = {}
 task_listeners = {}
@@ -75,9 +76,9 @@ def log_progress(progress_callback, message):
 def _required_export_files_for_task(task_name):
     files = []
 
-    if task_name == "rating":
+    if task_name in ("rating", "sync"):
         files.append(config.ratings_path)
-    elif task_name == "watchlist":
+    if task_name in ("watchlist", "sync"):
         files.append(config.watchlist_path)
         if config.include_watched_not_rated:
             files.extend([config.watched_path, config.ratings_path])
@@ -163,6 +164,15 @@ def run_rating(logger, progress_callback=None, auth_code=None):
     logger.name = 'RATING'
     rating.rating(plex, movies, logger, progress_callback)
     return "Updated ratings"
+
+def run_sync(logger, progress_callback=None, auth_code=None):
+    # one export download and one plex library load for both tasks
+    lb_export("sync", progress_callback, auth_code)
+
+    library = matching.LibraryIndex(movies, logger)
+    watchlist.watchlist(plex, movies, logging.getLogger('WATCHLIST'), progress_callback, library)
+    rating.rating(plex, movies, logging.getLogger('RATING'), progress_callback, library)
+    return "Imported watchlist and updated ratings"
 
 @app.before_request
 def require_auth():
@@ -356,6 +366,7 @@ def _run_threaded_task(name, auth_code=None):
     task_runners = {
         "watchlist": run_watchlist,
         "rating": run_rating,
+        "sync": run_sync,
     }
 
     if name not in task_runners:
@@ -395,7 +406,8 @@ def action(name):
         "rating",
         "cleanup_missing",
         "strip_missing_years",
-        "refresh_release_cache"
+        "refresh_release_cache",
+        "sync"
     ]:
         return jsonify(success=False, message=f"Unknown action '{name}'")
 
