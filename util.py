@@ -1,5 +1,7 @@
 import csv
 import os
+import re
+import unicodedata
 
 
 def resolve_existing_path(file_path):
@@ -68,7 +70,15 @@ def find_movie_by_letterboxd_title(mapping, combination):
 def _normalize_title(value):
     if value is None:
         return ""
-    return str(value).strip().lower()
+
+    normalized = unicodedata.normalize("NFKD", str(value))
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.lower().strip()
+    normalized = normalized.replace("&", " and ")
+    # keep unicode letters/digits so non-latin titles do not collapse to an empty string
+    normalized = re.sub(r"[\W_]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
 
 
 def remove_from_missing_if_needed(missing, names):
@@ -77,4 +87,3 @@ def remove_from_missing_if_needed(missing, names):
         return missing
 
     return [movie for movie in missing if _normalize_title(movie.name) not in names_set]
-
