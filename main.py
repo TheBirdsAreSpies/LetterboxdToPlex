@@ -507,6 +507,12 @@ def action(name):
             )
         )
 
+def _sse_message(msg):
+    # every line needs its own data field, a bare newline would end the event early
+    lines = str(msg).splitlines() or [""]
+    return "".join(f"data: {line}\n" for line in lines) + "\n"
+
+
 @app.route("/stream/<task_name>")
 def stream_task(task_name):
     if task_name not in THREAD_TASKS:
@@ -525,7 +531,7 @@ def stream_task(task_name):
         try:
             if replay_history:
                 for msg in state["logs"]:
-                    yield f"data: {msg}\n\n"
+                    yield _sse_message(msg)
 
             if not state["running"]:
                 return
@@ -534,7 +540,7 @@ def stream_task(task_name):
                 msg = listener.get()
                 if msg is None:
                     break
-                yield f"data: {msg}\n\n"
+                yield _sse_message(msg)
         finally:
             _remove_task_listener(task_name, listener)
 
