@@ -282,7 +282,19 @@ def get_tmdb_id_for_letterboxd_movie(lb_title: str, lb_year: str):
     return movie_id
 
 
-def get_configured_release_date_for_movie(movie_id: str, refresh: bool = False):
+def __release_dates_fetched_within(movie_id: str, max_age_hours: int):
+    connection = sqlite3.connect(config.db_path)
+    cursor = connection.cursor()
+    cursor.execute("SELECT 1 FROM tmdb_releases WHERE tmdb_id = ? AND created_at >= DATETIME('now', ?) LIMIT 1",
+                   (movie_id, f"-{max_age_hours} hours"))
+    row = cursor.fetchone()
+    cursor.close()
+    connection.close()
+    return row is not None
+
+
+def get_configured_release_date_for_movie(movie_id: str, refresh: bool = False, max_age_hours: int = None):
+    """With max_age_hours, a refresh is skipped if the release dates were fetched within that time."""
     if not movie_id:
         return None
 
@@ -290,7 +302,7 @@ def get_configured_release_date_for_movie(movie_id: str, refresh: bool = False):
     if not movie_id or movie_id in {"-1", "None", "null"}:
         return None
 
-    if refresh:
+    if refresh and not (max_age_hours and __release_dates_fetched_within(movie_id, max_age_hours)):
         release_date(movie_id)
 
     releases = get_release_dates(movie_id)

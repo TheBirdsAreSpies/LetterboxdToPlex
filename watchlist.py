@@ -14,10 +14,14 @@ from mapping import Mapping
 from movie import Movie
 from tqdm import tqdm
 
+# release dates of missing movies are refreshed on every sync, but at most once within this time
+RELEASE_DATE_MAX_AGE_HOURS = 24
+
 
 def _refresh_release_date_for_missing(tmdb_id):
     try:
-        return tmdb.get_configured_release_date_for_movie(tmdb_id, refresh=True)
+        return tmdb.get_configured_release_date_for_movie(tmdb_id, refresh=True,
+                                                          max_age_hours=RELEASE_DATE_MAX_AGE_HOURS)
     except Exception:
         return None
 
