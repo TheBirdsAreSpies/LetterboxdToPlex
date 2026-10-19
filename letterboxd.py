@@ -5,6 +5,8 @@ import config
 from letterboxdpy.movie import Movie
 
 REQUEST_TIMEOUT_SECONDS = 30
+# scraping a movie page takes a few seconds, entries without a tmdb link (unreleased movies, tv shows) are retried only after this
+TMDB_LOOKUP_RETRY_DAYS = 3
 
 
 def __letterboxd_movie_from_slug(slug):
@@ -16,12 +18,16 @@ def ids_from_slug(slug):
     connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
 
-    select_query = 'SELECT * FROM letterboxd_cache WHERE slug = ?'
-    cursor.execute(select_query, (slug,))
+    select_query = ('SELECT tmdb_id, imdb_id, tmdb_checked_at >= DATETIME(\'now\', ?) '
+                    'FROM letterboxd_cache WHERE slug = ?')
+    cursor.execute(select_query, (f'-{TMDB_LOOKUP_RETRY_DAYS} days', slug))
     rs = cursor.fetchone()
+    connection.close()
 
-    if rs and rs[4] is not None:
-        return [rs[4], rs[5]]
+    if rs and rs[0] is not None:
+        return [rs[0], rs[1]]
+    elif rs and rs[2]:  # failed recently, do not scrape again yet
+        return [-1, -1]
     else:
         try:
             lb_movie = __letterboxd_movie_from_slug(slug)
@@ -39,7 +45,18 @@ def ids_from_slug(slug):
             set_tmdb_id(slug, tmdb_id, imdb_id)
             return [tmdb_id, imdb_id]
         except Exception:
+            __mark_tmdb_lookup_failed(slug)
             return [-1, -1]
+
+
+def __mark_tmdb_lookup_failed(slug):
+    try:
+        connection = sqlite3.connect(config.db_path)
+        connection.execute('UPDATE letterboxd_cache SET tmdb_checked_at = CURRENT_TIMESTAMP WHERE slug = ?', (slug,))
+        connection.commit()
+        connection.close()
+    except sqlite3.Error:
+        pass
 
 
 def slug_from_short_url(uri):
@@ -82,6 +99,11 @@ def create_table():
     connection = sqlite3.connect(config.db_path)
     cursor = connection.cursor()
     cursor.execute(create_table_query)
+
+    cursor.execute('PRAGMA table_info(letterboxd_cache)')
+    if 'tmdb_checked_at' not in {row[1] for row in cursor.fetchall()}:
+        cursor.execute('ALTER TABLE letterboxd_cache ADD COLUMN tmdb_checked_at TIMESTAMP NULL')
+
     connection.commit()
     connection.close()
 
