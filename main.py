@@ -22,6 +22,7 @@ import shutil
 import selector
 import util
 
+from mapping import Mapping
 from session import Session
 from plexapi.myplex import PlexServer
 
@@ -420,6 +421,11 @@ def action(name):
                 message="No CSV movie names found. Cleanup skipped to avoid deleting all missing entries.",
                 details=source_stats,
             )
+
+        # missing entries of mapped movies carry the plex title instead of the letterboxd one
+        for item in Mapping.load_json() or []:
+            if str(item.letterboxd_title).strip().lower() in known_names:
+                known_names.add(str(item.plex_title).strip().lower())
 
         original_count = len(missing)
 
