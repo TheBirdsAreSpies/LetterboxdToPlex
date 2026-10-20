@@ -73,6 +73,7 @@
     </div>
 
     <h2>Missing Movies</h2>
+    <div id="missingSection">
     {% if missing %}
     <div class="table-wrap">
     <table id="missingTable" class="two-tone">
@@ -105,6 +106,7 @@
     {% else %}
     <p>No missing movies</p>
     {% endif %}
+    </div>
 
     <div id="releaseModalBackdrop" class="modal-backdrop" onclick="closeReleaseModal(event)">
         <div class="modal" onclick="event.stopPropagation()">
@@ -165,7 +167,40 @@
             }
             status.textContent = logLines.join('\n');
             status.scrollTop = status.scrollHeight;
+            // the stream ends when the task has finished, show the missing movies it produced
+            refreshMissingTable();
         };
+    }
+
+    function initMissingTable() {
+        const missingTable = document.getElementById('missingTable');
+        if (!missingTable) return;
+
+        // Make sure there's a tbody element for consistent DOM updates
+        if (!missingTable.tBodies || missingTable.tBodies.length === 0) {
+            const newTbody = document.createElement('tbody');
+            // move existing data rows (skip the header at rows[0]) into tbody
+            const dataRows = Array.from(missingTable.rows).slice(1);
+            dataRows.forEach(r => newTbody.appendChild(r));
+            missingTable.appendChild(newTbody);
+        }
+        updateRowStriping(missingTable);
+    }
+
+    // Replaces the missing movies section with the current server state, without reloading the page (keeps the log)
+    async function refreshMissingTable() {
+        try {
+            const res = await fetch('/', { cache: 'no-store' });
+            if (!res.ok) return;
+            const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+            const fresh = doc.getElementById('missingSection');
+            const current = document.getElementById('missingSection');
+            if (!fresh || !current) return;
+            current.replaceWith(fresh);
+            initMissingTable();
+        } catch (err) {
+            console.error('Error refreshing missing movies:', err);
+        }
     }
 
     async function runAction(name, authCode = null) {
@@ -216,6 +251,8 @@
                 if (STREAM_TASKS.has(name) && data.success) {
                     status.style.background = '#eef';
                     attachTaskStream(name, status);
+                } else if (data.success) {
+                    refreshMissingTable();
                 }
             }
         } catch (err) {
@@ -427,18 +464,7 @@
         loadAutoselections();
 
         // Ensure zebra striping is applied on initial page load
-        const missingTable = document.getElementById('missingTable');
-        if (missingTable) {
-            // Make sure there's a tbody element for consistent DOM updates
-            if (!missingTable.tBodies || missingTable.tBodies.length === 0) {
-                const newTbody = document.createElement('tbody');
-                // move existing data rows (skip the header at rows[0]) into tbody
-                const dataRows = Array.from(missingTable.rows).slice(1);
-                dataRows.forEach(r => newTbody.appendChild(r));
-                missingTable.appendChild(newTbody);
-            }
-            updateRowStriping(missingTable);
-        }
+        initMissingTable();
 
         // Check if a watchlist task is running on page load and reconnect to stream
         async function checkRunningTask() {
