@@ -535,6 +535,14 @@ def store_movie_to_cache(tmdb_translated_title: str, tmdb_release_date: str,
         cursor.execute(insert_query, (lb_title, lb_date,
                                       tmdb_translated_title, tmdb_release_date, tmdb_id, imdb_id))
         connection.commit()
+    elif str(rs[5]).strip() in {"", "-1", "None", "null"} and str(tmdb_id).strip() not in {"", "-1", "None", "null"}:
+        # the entry was cached without a tmdb id, the search result provides one now
+        details = __get_movie_details(tmdb_id)
+
+        update_query = ('UPDATE tmdb_cache SET tmdb_translated_title = ?, tmdb_release_date = ?, '
+                        'tmdb_id = ?, imdb_id = ? WHERE id = ?')
+        cursor.execute(update_query, (tmdb_translated_title, tmdb_release_date, tmdb_id, details.imdb_id, rs[0]))
+        connection.commit()
 
     cursor.close()
     connection.close()
@@ -580,7 +588,8 @@ def auth():
 def search_movie(title: str, year: int = None):
     if config.tmdb_cache:
         found = __get_cached(title, year, True)
-        if found:
+        # entries cached without a tmdb id are looked up again, the search result provides one
+        if found and str(found.id).strip() not in {"", "-1", "None", "null"}:
             return [found]
 
     compiled_title = urllib.parse.quote(title)

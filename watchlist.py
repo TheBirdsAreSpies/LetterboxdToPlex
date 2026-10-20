@@ -117,6 +117,15 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None, libr
             else:
                 selected = matching.find_by_title(movies, name, year, autoselector, combination, logger)
 
+            tmdb_name = tmdb_year = None
+            if not selected and config.tmdb_use_api:
+                # tmdb data is only needed for the missing list, so it is resolved for missing movies only
+                tmdb_name, tmdb_year, resolved_id = matching.lookup_tmdb(lb_name, lb_year, tmdb_id, logger)
+                if resolved_id != tmdb_id:
+                    # letterboxd has no tmdb link for this entry, retry with the id of the tmdb search result
+                    tmdb_id = resolved_id
+                    selected = matching.find_by_tmdb_id(library, movies, tmdb_id, autoselector, combination, logger)
+
             if selected:
                 logger.info(f'Found {selected.title} ({selected.year}), will add to watchlist')
                 to_add.append(selected)
@@ -125,12 +134,9 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None, libr
                 pbar.update(1)
                 continue
 
-            if config.tmdb_use_api:
-                # tmdb data is only needed for the missing list, so it is resolved for missing movies only
-                tmdb_name, tmdb_year = matching.lookup_tmdb(lb_name, lb_year, tmdb_id, logger)
-                if tmdb_name is not None and tmdb_year == '':  # could happen if there is no rls-date on tmdb
-                    pbar.update(1)
-                    continue
+            if tmdb_name is not None and tmdb_year == '':  # could happen if there is no rls-date on tmdb
+                pbar.update(1)
+                continue
 
             logger.info(f'Movie {name} ({year}) is missing')
             _mark_missing(missing, combination, tmdb_id, logger)

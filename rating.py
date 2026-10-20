@@ -72,10 +72,18 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None, library
                     tmdb_id = matching.tmdb_id_from_uri(uri, logger)
                     movie = matching.find_by_tmdb_id(library, movies, tmdb_id, autoselector, combination, logger)
 
-                    # seems like a tv show, skip
-                    if not movie and matching.lookup_tmdb(lb_name, lb_year, tmdb_id, logger)[0] is None:
-                        pbar.update(1)
-                        continue
+                    if not movie:
+                        tmdb_name, _, resolved_id = matching.lookup_tmdb(lb_name, lb_year, tmdb_id, logger)
+
+                        # seems like a tv show, skip
+                        if tmdb_name is None:
+                            pbar.update(1)
+                            continue
+
+                        if resolved_id != tmdb_id:
+                            # letterboxd has no tmdb link for this entry, retry with the id of the tmdb search result
+                            movie = matching.find_by_tmdb_id(library, movies, resolved_id, autoselector, combination,
+                                                             logger)
                 else:
                     movie = matching.find_by_title(movies, name, year, autoselector, combination, logger)
 

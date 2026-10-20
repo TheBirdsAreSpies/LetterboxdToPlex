@@ -76,8 +76,9 @@ def tmdb_id_from_uri(uri, logger: logging.Logger):
 def lookup_tmdb(name, year, tmdb_id, logger: logging.Logger):
     """
     Resolves the translated title and year of a Letterboxd entry on TMDB and caches them for the missing list.
+    If Letterboxd provides no TMDB id, the id of the TMDB search result is used instead.
 
-    Returns: (title, year) tuple, both are None if the movie was not found on TMDB
+    Returns: (title, year, tmdb_id) tuple, title and year are None if the movie was not found on TMDB
     """
     logger.debug('Trying to look it up on tmdb')
     tmdb_movies = tmdb.search_movie(title=name, year=year)
@@ -85,10 +86,14 @@ def lookup_tmdb(name, year, tmdb_id, logger: logging.Logger):
         logger.info('Searched TMDB, was not able to find.')
         tmdb_movies = tmdb.search_movie(title=name)
         if len(tmdb_movies) == 0:
-            return None, None
+            return None, None, tmdb_id
 
     tmdb_movie = tmdb_movies[0]
     logger.info(f'Searched TMDB {name} ({year})')
+
+    if not is_valid_tmdb_id(tmdb_id) and is_valid_tmdb_id(tmdb_movie.id):
+        tmdb_id = str(tmdb_movie.id)
+        logger.info(f'No TMDB id on Letterboxd, using TMDB search result {tmdb_id}')
 
     translated_name = tmdb.translation(tmdb_movie)
     tmdb_year = tmdb_movie.release_date[:4]
@@ -96,7 +101,7 @@ def lookup_tmdb(name, year, tmdb_id, logger: logging.Logger):
     if tmdb_year != '':  # could be empty if there is no rls-date on tmdb
         tmdb.store_movie_to_cache(translated_name, tmdb_year, name, year, tmdb_id)
 
-    return translated_name, tmdb_year
+    return translated_name, tmdb_year, tmdb_id
 
 
 def find_by_tmdb_id(library: LibraryIndex, movies, tmdb_id, autoselector, combination, logger: logging.Logger):
