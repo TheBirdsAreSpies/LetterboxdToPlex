@@ -169,7 +169,7 @@ def run_sync(logger, progress_callback=None, auth_code=None):
     # one export download and one plex library load for both tasks
     lb_export("sync", progress_callback, auth_code)
 
-    library = matching.LibraryIndex(movies, logger)
+    library = matching.LibraryIndex(movies, logger, progress_callback)
     watchlist.watchlist(plex, movies, logging.getLogger('WATCHLIST'), progress_callback, library)
     rating.rating(plex, movies, logging.getLogger('RATING'), progress_callback, library)
     return "Imported watchlist and updated ratings"

@@ -58,7 +58,7 @@ def watchlist(plex, movies, logger: logging.Logger, progress_callback=None, libr
 
     missing = MissingMovie.load_json() or []
     to_add = []
-    library = library or matching.LibraryIndex(movies, logger)
+    library = library or matching.LibraryIndex(movies, logger, progress_callback)
 
     with tqdm(total=len(sorted_data), unit='Movies') as pbar:
         for name, year, uri in sorted_data:

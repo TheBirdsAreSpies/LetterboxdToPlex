@@ -4,6 +4,7 @@ import time
 import config
 import letterboxd
 import tmdb
+import util
 from selector import choose_movie
 
 from concurrent.futures import ThreadPoolExecutor
@@ -22,9 +23,11 @@ class LibraryIndex:
     # only guids, title, year and edition are needed, skipping the rest makes the response much smaller
     EXCLUDE_ELEMENTS = 'Media,Genre,Country,Director,Writer,Role,Producer,Collection,Label,Field,Image,Rating,UltraBlurColors'
 
-    def __init__(self, movies, logger: logging.Logger):
+    def __init__(self, movies, logger: logging.Logger, progress_callback=None):
         self._movies = movies
         self._logger = logger
+        # loading takes a while, so it is reported to the web ui as well
+        self._publish_progress = util.progress_publisher(logger, progress_callback)
         self._by_tmdb_id = None
 
     @property
@@ -43,6 +46,7 @@ class LibraryIndex:
             return self._by_tmdb_id
 
         started = time.time()
+        self._publish_progress(f'Loading Plex library ({self._movies.totalSize} movies)...')
         with ThreadPoolExecutor(self.PARALLEL_PAGES) as executor:
             pages = list(executor.map(self._fetch_page, range(0, self._movies.totalSize, self.PAGE_SIZE)))
 
@@ -55,7 +59,7 @@ class LibraryIndex:
                     if str(guid.id).startswith('tmdb://'):
                         self._by_tmdb_id.setdefault(str(guid.id), []).append(movie)
 
-        self._logger.info(f'Loaded {count} movies from Plex in {time.time() - started:.1f} s')
+        self._publish_progress(f'Loaded {count} movies from Plex in {time.time() - started:.1f} s')
         return self._by_tmdb_id
 
     def find(self, tmdb_id):

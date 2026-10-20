@@ -22,7 +22,7 @@ def rating(plex, movies, logger: logging.Logger, progress_callback=None, library
     data = _read_ratings_csv_()
     publish_progress = util.progress_publisher(logger, progress_callback)
     # loaded lazily, unchanged ratings are skipped without touching plex
-    library = library or matching.LibraryIndex(movies, logger)
+    library = library or matching.LibraryIndex(movies, logger, progress_callback)
 
     connection = sqlite3.connect(config.db_path)
     try:
